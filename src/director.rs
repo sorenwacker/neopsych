@@ -9,8 +9,10 @@ use crate::rng::Rng;
 use std::f32::consts::TAU;
 
 pub const MAX_OBJECTS: usize = 12;
-/// Chance that a preset has glyph rain falling among its objects.
-const RAIN_CHANCE: f32 = 0.35;
+/// Chance that a random event starts a shower of glyph rain (or ends one).
+const RAIN_CHANCE: f32 = 0.15;
+/// Where a finished rain drop is parked until it is removed.
+const GONE: f32 = 100.0;
 /// Every object can be drawn up to this many times by symmetry.
 pub const MAX_COPIES: usize = 12;
 
@@ -98,6 +100,8 @@ struct Object {
     additive: bool,
     /// Seconds of movement so far, scaled by the movement speed.
     age: f32,
+    /// Rain only: don't restart at the top after falling off the bottom.
+    retire: bool,
 }
 
 impl Object {
@@ -125,8 +129,13 @@ impl Object {
             Motion::Rain { speed, rng } => {
                 self.pos[1] += *speed * dt;
                 if self.pos[1] > 1.05 {
-                    self.pos = [rng.range(-1.0, 1.0), -1.05 - rng.range(0.0, 0.5)];
-                    *speed = rng.range(0.3, 1.3);
+                    if self.retire {
+                        // Fell off the bottom while the shower is ending: gone.
+                        self.pos[1] = GONE;
+                    } else {
+                        self.pos = [rng.range(-1.0, 1.0), -1.05 - rng.range(0.0, 0.5)];
+                        *speed = rng.range(0.3, 1.3);
+                    }
                 }
                 // A new glyph every frame makes the head flicker.
                 self.lobes = rng.below(1 << 16) as f32;
@@ -302,6 +311,7 @@ impl Director {
 
         let move_dt = dt * self.motion_mult;
         let brushes = self.objects.iter_mut().chain(&mut self.drops).map(|o| o.step(move_dt)).collect();
+        self.drops.retain(|d| d.pos[1] < GONE);
 
         Frame {
             field,
@@ -369,11 +379,8 @@ impl Director {
         let limit = MAX_OBJECTS * MAX_COPIES / copies;
         self.objects = (0..count.min(limit)).map(|_| random_object(r, recipe, theme)).collect();
 
-        // Sometimes glyph rain falls among the objects, in the same colours.
-        let drops = if r.chance(RAIN_CHANCE) { r.range(15.0, 60.0) as usize } else { 0 };
-        let room = limit.saturating_sub(self.objects.len());
-        let cell = r.range(0.015, 0.03);
-        self.drops = (0..drops.min(room)).map(|_| random_drop(r, cell)).collect();
+        // Rain from the last preset finishes falling; new showers come from events.
+        self.stop_rain();
 
         // Blend from whatever is showing into the preset's own palette.
         self.pal_from = self.current_palette(t);
@@ -416,16 +423,32 @@ impl Director {
         self.symmetry = Symmetry { turns, mirror };
     }
 
-    /// Hotkey: start or stop glyph rain in the current preset.
+    /// Hotkey (and events): start a shower of glyph rain, or let the current
+    /// one end.
     pub fn toggle_rain(&mut self) {
-        if !self.drops.is_empty() {
-            self.drops.clear();
-            return;
+        if self.raining() {
+            self.stop_rain();
+        } else {
+            self.start_rain();
         }
+    }
+
+    fn raining(&self) -> bool {
+        self.drops.iter().any(|d| !d.retire)
+    }
+
+    fn start_rain(&mut self) {
         let room = (MAX_OBJECTS * MAX_COPIES / self.symmetry.copies()).saturating_sub(self.objects.len());
-        let cell = self.rng.range(0.015, 0.03);
-        let count = (self.rng.range(15.0, 60.0) as usize).min(room);
+        let cell = self.rng.range(0.02, 0.032);
+        let count = (self.rng.range(50.0, 110.0) as usize).min(room);
         self.drops = (0..count).map(|_| random_drop(&mut self.rng, cell)).collect();
+    }
+
+    /// Drops already falling finish their fall; none start again.
+    fn stop_rain(&mut self) {
+        for d in &mut self.drops {
+            d.retire = true;
+        }
     }
 
     /// Hotkey: run the colour cycling the other way.
@@ -453,11 +476,15 @@ impl Director {
         self.next_field = t + (self.transition_seconds * r.range(0.67, 1.33)) as f64;
     }
 
-    /// Small surprises within a preset: reverse the cycling, change its pace,
-    /// or swap one object for a new one.
+    /// Small surprises within a preset: start or end a rain shower, reverse
+    /// the cycling, change its pace, or swap one object for a new one.
     fn event(&mut self, t: f64) {
+        self.next_event = t + self.rng.range(4.0, 12.0) as f64;
+        if self.rng.chance(RAIN_CHANCE) {
+            self.toggle_rain();
+            return;
+        }
         let r = &mut self.rng;
-        self.next_event = t + r.range(4.0, 12.0) as f64;
         match r.below(3) {
             0 => self.speed_target = -self.speed_target,
             1 => self.speed_target = self.speed_target.signum() * r.range(self.recipe.cycle.0, self.recipe.cycle.1),
@@ -490,6 +517,7 @@ fn random_drop(r: &mut Rng, cell: f32) -> Object {
         lobes: 0.0,
         additive: false,
         age: 0.0,
+        retire: false,
     }
 }
 
@@ -529,6 +557,7 @@ fn random_object(r: &mut Rng, recipe: &Recipe, theme: u32) -> Object {
         lobes: r.int(recipe.sides.0, recipe.sides.1),
         additive: recipe.additive,
         age: 0.0,
+        retire: false,
     }
 }
 
