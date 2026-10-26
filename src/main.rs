@@ -46,6 +46,7 @@ B\tnew background pattern
 I\tshow a wallpaper picture
 C\tblend into new colours
 M\tnext symmetry
+G\tglyph rain on / off
 R\treverse colour cycling
 + / -\tcolour cycling faster / slower
 Shift + wheel\tcolour cycling faster / slower
@@ -293,6 +294,7 @@ impl ApplicationHandler for App {
                         "i" => d.show_picture(t),
                         "c" => d.next_palette(t),
                         "m" => d.next_symmetry(),
+                        "g" => d.toggle_rain(),
                         "r" => d.reverse(),
                         "+" | "=" => d.scale_speed(1.25),
                         "-" => d.scale_speed(0.8),

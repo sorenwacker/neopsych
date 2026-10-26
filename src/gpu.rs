@@ -1,6 +1,5 @@
 use crate::director::{Brush, FieldJob, Frame, MAX_COPIES, MAX_OBJECTS};
 use crate::images::Gray;
-use crate::presets;
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -125,7 +124,6 @@ pub struct Target {
     phase: Option<wgpu::Buffer>,
     picture: wgpu::TextureView,
     picture_sampler: wgpu::Sampler,
-    picture_aspect: f32,
     /// Set by alloc, which always runs in new.
     display_bg: Option<wgpu::BindGroup>,
     needs_full: bool,
@@ -186,7 +184,6 @@ impl Target {
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             }),
-            picture_aspect: 1.0,
             display_bg: None,
             needs_full: true,
         };
@@ -261,7 +258,6 @@ impl Target {
     /// Replaces the picture used by the image field.
     pub fn set_picture(&mut self, gpu: &Gpu, img: &Gray) {
         self.picture = picture_texture(gpu, img.width, img.height, &img.pixels);
-        self.picture_aspect = img.width as f32 / img.height as f32;
         let Some(phase) = &self.phase else { return };
         for i in 0..self.slots.len() {
             self.slots[i].bg = self.compute_bind_group(gpu, &self.slots[i].ubo, phase);
@@ -349,10 +345,6 @@ impl Target {
     }
 
     fn field_params(&self, f: &FieldJob) -> Params {
-        let mut a = f.a;
-        if f.mode == presets::IMAGE {
-            a[2] = self.picture_aspect;
-        }
         Params {
             size: self.dims,
             origin: [0, 0],
@@ -360,7 +352,7 @@ impl Target {
             wipe: f.wipe,
             progress: f.progress,
             seed: f.seed,
-            a,
+            a: f.a,
             b: f.b,
             c: f.c,
             shape: [0.0; 4],
@@ -400,6 +392,8 @@ impl Target {
         let pos = b.pos;
         let extent = match b.shape {
             2 | 4 | 9 => b.radius * std::f32::consts::SQRT_2 + b.width,
+            // A glyph cell around the head is at most 2 radii away.
+            10 => b.radius * 2.5,
             _ => b.radius + b.width,
         };
         let half = h as f32 * 0.5;

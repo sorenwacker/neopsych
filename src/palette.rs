@@ -20,6 +20,7 @@ pub fn random_of(rng: &mut Rng, styles: &[u32]) -> Palette {
     p
 }
 
+
 /// Brightens dark entries while keeping their hue.
 fn lift(p: &mut Palette) {
     for e in p.iter_mut() {

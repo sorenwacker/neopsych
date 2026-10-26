@@ -9,6 +9,8 @@ use crate::rng::Rng;
 use std::f32::consts::TAU;
 
 pub const MAX_OBJECTS: usize = 12;
+/// Chance that a preset has glyph rain falling among its objects.
+const RAIN_CHANCE: f32 = 0.35;
 /// Every object can be drawn up to this many times by symmetry.
 pub const MAX_COPIES: usize = 12;
 
@@ -75,6 +77,8 @@ enum Motion {
     Bounce { vel: [f32; 2] },
     /// A Lissajous orbit.
     Orbit { freq: [f32; 4], phase: [f32; 4] },
+    /// Falling straight down, restarting at the top in a random column.
+    Rain { speed: f32, rng: Rng },
 }
 
 struct Object {
@@ -117,6 +121,15 @@ impl Object {
                     0.7 * (freq[0] * s + phase[0]).sin() + 0.3 * (freq[2] * s + phase[2]).sin(),
                     0.7 * (freq[1] * s + phase[1]).sin() + 0.3 * (freq[3] * s + phase[3]).sin(),
                 ];
+            }
+            Motion::Rain { speed, rng } => {
+                self.pos[1] += *speed * dt;
+                if self.pos[1] > 1.05 {
+                    self.pos = [rng.range(-1.0, 1.0), -1.05 - rng.range(0.0, 0.5)];
+                    *speed = rng.range(0.3, 1.3);
+                }
+                // A new glyph every frame makes the head flicker.
+                self.lobes = rng.below(1 << 16) as f32;
             }
         }
         self.angle += self.spin * dt;
@@ -162,6 +175,8 @@ pub struct Director {
     field_dur: f32,
     field_active: bool,
     objects: Vec<Object>,
+    /// Glyph rain columns, kept apart so events never swap them for objects.
+    drops: Vec<Object>,
     pal_from: Palette,
     pal_to: Palette,
     pal_start: f64,
@@ -213,6 +228,7 @@ impl Director {
             field_dur: 2.0,
             field_active: false,
             objects: Vec::new(),
+            drops: Vec::new(),
             pal_from: pal,
             pal_to: pal,
             pal_start: 0.0,
@@ -281,11 +297,11 @@ impl Director {
             None
         };
 
-        let move_dt = dt * self.motion_mult;
-        let brushes = self.objects.iter_mut().map(|o| o.step(move_dt)).collect();
-
         self.speed += (self.speed_target - self.speed) * (dt * 0.7).min(1.0);
         self.offset = (self.offset + (self.speed * self.speed_mult * dt) as f64).rem_euclid(1.0);
+
+        let move_dt = dt * self.motion_mult;
+        let brushes = self.objects.iter_mut().chain(&mut self.drops).map(|o| o.step(move_dt)).collect();
 
         Frame {
             field,
@@ -349,7 +365,15 @@ impl Director {
             count = count.min(2);
         }
         let theme = self.theme;
-        self.objects = (0..count.min(MAX_OBJECTS)).map(|_| random_object(r, recipe, theme)).collect();
+        // Every stamp needs a slot on the GPU; see gpu::Target.
+        let limit = MAX_OBJECTS * MAX_COPIES / copies;
+        self.objects = (0..count.min(limit)).map(|_| random_object(r, recipe, theme)).collect();
+
+        // Sometimes glyph rain falls among the objects, in the same colours.
+        let drops = if r.chance(RAIN_CHANCE) { r.range(15.0, 60.0) as usize } else { 0 };
+        let room = limit.saturating_sub(self.objects.len());
+        let cell = r.range(0.015, 0.03);
+        self.drops = (0..drops.min(room)).map(|_| random_drop(r, cell)).collect();
 
         // Blend from whatever is showing into the preset's own palette.
         self.pal_from = self.current_palette(t);
@@ -392,6 +416,18 @@ impl Director {
         self.symmetry = Symmetry { turns, mirror };
     }
 
+    /// Hotkey: start or stop glyph rain in the current preset.
+    pub fn toggle_rain(&mut self) {
+        if !self.drops.is_empty() {
+            self.drops.clear();
+            return;
+        }
+        let room = (MAX_OBJECTS * MAX_COPIES / self.symmetry.copies()).saturating_sub(self.objects.len());
+        let cell = self.rng.range(0.015, 0.03);
+        let count = (self.rng.range(15.0, 60.0) as usize).min(room);
+        self.drops = (0..count).map(|_| random_drop(&mut self.rng, cell)).collect();
+    }
+
     /// Hotkey: run the colour cycling the other way.
     pub fn reverse(&mut self) {
         self.speed_target = -self.speed_target;
@@ -432,6 +468,28 @@ impl Director {
                 }
             }
         }
+    }
+}
+
+/// One column of glyph rain. All drops in a preset share `cell` (half a
+/// glyph's height) so they fall on the same grid.
+fn random_drop(r: &mut Rng, cell: f32) -> Object {
+    Object {
+        shape: presets::GLYPH,
+        motion: Motion::Rain { speed: r.range(0.3, 1.3), rng: Rng::new(r.next_u64()) },
+        pos: [r.range(-1.0, 1.0), r.range(-1.6, 1.0)],
+        radius: cell,
+        wobble: 0.0,
+        wobble_freq: 0.0,
+        width: 0.0,
+        angle: 0.0,
+        spin: 0.0,
+        color: r.f(),
+        color_rate: r.sign() * r.range(0.2, 1.2),
+        grad: 0.0,
+        lobes: 0.0,
+        additive: false,
+        age: 0.0,
     }
 }
 

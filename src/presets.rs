@@ -13,6 +13,9 @@ pub const STAR: u32 = 6;
 pub const POLYGON: u32 = 7;
 pub const SLAB: u32 = 8; // filled polygon
 pub const CROSS: u32 = 9;
+/// One cell of glyph rain: a random blocky glyph on a fixed grid. Only used
+/// for rain drops, which the director adds to some presets.
+pub const GLYPH: u32 = 10;
 const ALL_SHAPES: &[u32] = &[RING, DISC, SQUARE, STICK, TILE, FLOWER, STAR, POLYGON, SLAB, CROSS];
 
 /// Background patterns, see `field` in field.wgsl.

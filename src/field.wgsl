@@ -43,7 +43,7 @@ fn rot(p: vec2<f32>, a: f32) -> vec2<f32> {
 
 // Pattern value in palette cycles; only the fractional part matters.
 // Multipliers of angle/TAU are whole numbers so there is no seam.
-fn field(p: vec2<f32>) -> f32 {
+fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
     switch P.mode {
         case 0u: {
             return (sin(p.x * P.a.x + P.a.y) + sin(p.y * P.a.z + P.a.w)
@@ -77,19 +77,11 @@ fn field(p: vec2<f32>) -> f32 {
             let q = p + P.b.z * vec2<f32>(sin(p.y * P.a.x + P.a.y), sin(p.x * P.a.z + P.a.w));
             return length(q) * P.b.x + atan2(q.y, q.x) / TAU * P.b.y;
         }
-        // picture: brightness picks the palette entry.
-        // a.x = cycles across black..white, a.y = start, a.z = picture aspect.
+        // picture, stretched to fill the screen: brightness picks the palette entry.
+        // a.x = cycles across black..white, a.y = start.
         default: {
-            let screen = f32(P.size.x) / f32(P.size.y);
-            let s = vec2<f32>(p.x / screen, p.y);
-            // Cover the screen, cropping whichever way the picture overhangs.
-            var uv = s * 0.5;
-            if (P.a.z > screen) {
-                uv.x *= screen / P.a.z;
-            } else {
-                uv.y *= P.a.z / screen;
-            }
-            let lum = textureSampleLevel(picture, picture_sampler, uv + 0.5, 0.0).r;
+            let uv = (vec2<f32>(px) + 0.5) / vec2<f32>(P.size);
+            let lum = textureSampleLevel(picture, picture_sampler, uv, 0.0).r;
             return lum * P.a.x + P.a.y;
         }
     }
@@ -171,6 +163,22 @@ fn stamp(p: vec2<f32>) -> vec2<f32> {
             let inside = (u.x < t && u.y < s.z) || (u.y < t && u.x < s.z);
             return vec2<f32>(select(0.0, 1.0, inside), max(u.x, u.y) / s.z);
         }
+        // glyph rain: the cell of a fixed grid that holds the head, filled
+        // with a random 5x7 bitmap picked by c.x. Radius is half the cell height.
+        case 10u: {
+            let size = vec2<f32>(s.z * 1.3, s.z * 2.0);
+            let cell = floor(p / size);
+            if (any(cell != floor(s.xy / size))) {
+                return vec2<f32>(0.0, 0.0);
+            }
+            let local = (p - cell * size) / size;
+            let g = vec2<f32>((local.x - 0.12) / 0.76 * 5.0, (local.y - 0.08) / 0.84 * 7.0);
+            if (g.x < 0.0 || g.y < 0.0 || g.x >= 5.0 || g.y >= 7.0) {
+                return vec2<f32>(0.0, 0.0);
+            }
+            let bit = hash(vec2<u32>(g), u32(P.c.x)) < 0.45;
+            return vec2<f32>(select(0.0, 1.0, bit), 0.0);
+        }
         // star outline
         default: {
             let ang = atan2(q.y, q.x) + P.shape2.z;
@@ -202,6 +210,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     if (revealed(px, p)) {
-        phase[i] = u32(fract(field(p)) * 65536.0) & 0xFFFFu;
+        phase[i] = u32(fract(field(p, px)) * 65536.0) & 0xFFFFu;
     }
 }
