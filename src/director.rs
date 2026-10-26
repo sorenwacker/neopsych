@@ -59,8 +59,6 @@ pub struct Brush {
     /// Palette cycles spread across the shape, for concentric bands.
     pub grad: f32,
     pub lobes: f32,
-    /// true: add to the pattern underneath instead of overwriting it.
-    pub additive: bool,
 }
 
 pub struct Frame {
@@ -99,7 +97,6 @@ struct Object {
     color_rate: f32,
     grad: f32,
     lobes: f32,
-    additive: bool,
     /// Seconds of movement so far, scaled by the movement speed.
     age: f32,
     /// Rain only: don't restart at the top after falling off the bottom.
@@ -154,7 +151,6 @@ impl Object {
             color: self.color,
             grad: self.grad,
             lobes: self.lobes,
-            additive: self.additive,
         }
     }
 }
@@ -526,7 +522,6 @@ fn random_drop(r: &mut Rng, cell: f32) -> Object {
         color_rate: r.sign() * r.range(0.2, 1.2),
         grad: 0.0,
         lobes: 0.0,
-        additive: false,
         age: 0.0,
         retire: false,
     }
@@ -566,7 +561,6 @@ fn random_object(r: &mut Rng, recipe: &Recipe, theme: u32) -> Object {
         color_rate: r.sign() * r.range(recipe.color_rate.0, recipe.color_rate.1),
         grad: if r.chance(recipe.grad) { r.sign() * r.range(0.05, 1.0) } else { 0.0 },
         lobes: r.int(recipe.sides.0, recipe.sides.1),
-        additive: recipe.additive,
         age: 0.0,
         retire: false,
     }

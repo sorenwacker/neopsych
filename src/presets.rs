@@ -63,7 +63,6 @@ pub struct Recipe {
     pub color_rate: (f32, f32),
     /// Chance of a colour gradient across each shape.
     pub grad: f32,
-    pub additive: bool,
     /// Sides of polygons and petals of flowers and stars.
     pub sides: (i32, i32),
     pub palettes: &'static [u32],
@@ -84,7 +83,6 @@ const BASE: Recipe = Recipe {
     wobble: 0.4,
     color_rate: (0.15, 1.0),
     grad: 0.5,
-    additive: false,
     sides: (3, 8),
     palettes: ALL_PALETTES,
     cycle: (0.03, 0.25),
@@ -139,7 +137,6 @@ pub const FAMILIES: &[Recipe] = &[
         shapes: &[RING, DISC],
         count: (1, 3),
         radius: (0.03, 0.12),
-        additive: true,
         palettes: &[COSINE, SOFT_BANDS, GUNS],
         ..BASE
     },
@@ -158,7 +155,6 @@ pub const FAMILIES: &[Recipe] = &[
         shapes: &[DISC],
         count: (3, 8),
         radius: (0.03, 0.15),
-        additive: true,
         ..BASE
     },
     Recipe { name: "Tunnel Flowers", fields: &[TUNNEL], shapes: &[FLOWER, STAR], count: (2, 5), ..BASE },

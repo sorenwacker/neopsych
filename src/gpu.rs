@@ -462,7 +462,7 @@ impl Target {
             seed: 0.0,
             a: [0.0; 4],
             b: [0.0; 4],
-            c: [b.lobes, b.additive as u32 as f32, 0.0, 0.0],
+            c: [b.lobes, 0.0, 0.0, 0.0],
             shape: [pos[0], pos[1], b.radius, b.width],
             shape2: [b.shape as f32, b.color, b.angle, b.grad],
         };

@@ -90,7 +90,7 @@ fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
 // Object stamp at p: x = inside (1) or outside (0), y = 0..1 position across
 // the shape, used to spread a colour gradient over it.
 // shape = (x, y, radius, width), shape2 = (kind, colour, angle, gradient),
-// c = (lobes, additive, -, -).
+// c = (lobes, -, -, -).
 fn stamp(p: vec2<f32>) -> vec2<f32> {
     let s = P.shape;
     let q = p - s.xy;
@@ -188,12 +188,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (P.mode >= BRUSH_MODE) {
         let st = stamp(p);
         if (st.x > 0.0) {
-            let v = u32(fract(P.shape2.y + st.y * P.shape2.w) * 65536.0);
-            if (P.c.y > 0.0) {
-                phase[i] = phase[i] + v;
-            } else {
-                phase[i] = v;
-            }
+            phase[i] = u32(fract(P.shape2.y + st.y * P.shape2.w) * 65536.0);
         }
         return;
     }
