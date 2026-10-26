@@ -181,6 +181,8 @@ pub struct Director {
     field_start: f64,
     field_dur: f32,
     field_active: bool,
+    /// A background waiting for the current fade to finish; true = picture.
+    queued: Option<bool>,
     objects: Vec<Object>,
     /// Glyph rain columns, kept apart so events never swap them for objects.
     drops: Vec<Object>,
@@ -236,6 +238,7 @@ impl Director {
             field_start: 0.0,
             field_dur: 2.0,
             field_active: false,
+            queued: None,
             objects: Vec::new(),
             drops: Vec::new(),
             rain_switch: 0.0,
@@ -293,12 +296,9 @@ impl Director {
             }
         }
         // A fresh background now and then within the preset, sometimes a picture.
-        if t >= self.next_field {
-            if self.image_ready && self.order.chance(self.image_chance) {
-                self.show_picture(t);
-            } else {
-                self.new_field(t);
-            }
+        if t >= self.next_field && !self.field_active {
+            let picture = self.image_ready && self.order.chance(self.image_chance);
+            self.begin_background(t, picture);
         }
         // The palette is always on its way to the next one.
         if t >= self.pal_start + self.pal_dur as f64 {
@@ -317,6 +317,12 @@ impl Director {
         } else {
             None
         };
+        // A background that arrived during the fade starts once it is over.
+        if !self.field_active {
+            if let Some(picture) = self.queued.take() {
+                self.begin_background(t, picture);
+            }
+        }
 
         self.speed += (self.speed_target - self.speed) * (dt * 0.7).min(1.0);
         self.offset = (self.offset + (self.speed * self.speed_mult * dt) as f64).rem_euclid(1.0);
@@ -351,16 +357,9 @@ impl Director {
         self.preset_end = t + self.preset_seconds as f64;
         self.next_event = t + self.rng.range(4.0, 12.0) as f64;
 
-        self.new_field(t);
-
         // Decided with the order rng so the preset's own sequence is unchanged.
         let picture = self.image_ready && self.order.chance(self.image_chance);
-        if picture {
-            // a.x: palette cycles across black..white, a.y: starting colour.
-            self.field.mode = presets::IMAGE;
-            self.field.a = [self.order.range(0.7, 2.0), self.order.f(), 0.0, 0.0];
-            self.new_image = true;
-        }
+        self.begin_background(t, picture);
 
         let r = &mut self.rng;
         self.theme = recipe.shapes[r.below(recipe.shapes.len() as u32) as usize];
@@ -400,20 +399,32 @@ impl Director {
         self.speed_target = self.rng.sign() * self.rng.range(recipe.cycle.0, recipe.cycle.1);
     }
 
-    /// Hotkey: sweep in a new background now.
+    /// Hotkey: fade in a new background.
     pub fn next_background(&mut self, t: f64) {
-        self.new_field(t);
+        self.begin_background(t, false);
     }
 
-    /// Hotkey: sweep in a picture now, if one is decoded.
+    /// Hotkey: fade in a picture, if one is decoded.
     pub fn show_picture(&mut self, t: f64) {
-        if !self.image_ready {
+        if self.image_ready {
+            self.begin_background(t, true);
+        }
+    }
+
+    /// Starts fading in a new pattern, or a picture. One already fading in
+    /// is never cut short: the new one waits and starts when it is done.
+    fn begin_background(&mut self, t: f64, picture: bool) {
+        if self.field_active {
+            self.queued = Some(picture);
             return;
         }
         self.new_field(t);
-        self.field.mode = presets::IMAGE;
-        self.field.a = [self.order.range(0.7, 2.0), self.order.f(), 0.0, 0.0];
-        self.new_image = true;
+        if picture && self.image_ready {
+            // a.x: palette cycles across black..white, a.y: starting colour.
+            self.field.mode = presets::IMAGE;
+            self.field.a = [self.order.range(0.7, 2.0), self.order.f(), 0.0, 0.0];
+            self.new_image = true;
+        }
     }
 
     /// Hotkey: blend quickly into a new palette.
