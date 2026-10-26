@@ -10,7 +10,7 @@ use std::f32::consts::TAU;
 
 pub const MAX_OBJECTS: usize = 12;
 /// Chance that a random event starts a shower of glyph rain (or ends one).
-const RAIN_CHANCE: f32 = 0.15;
+const RAIN_CHANCE: f32 = 0.1;
 /// Where a finished rain drop is parked until it is removed.
 const GONE: f32 = 100.0;
 /// Every object can be drawn up to this many times by symmetry.
@@ -440,7 +440,7 @@ impl Director {
     fn start_rain(&mut self) {
         let room = (MAX_OBJECTS * MAX_COPIES / self.symmetry.copies()).saturating_sub(self.objects.len());
         let cell = self.rng.range(0.02, 0.032);
-        let count = (self.rng.range(50.0, 110.0) as usize).min(room);
+        let count = (self.rng.range(20.0, 45.0) as usize).min(room);
         self.drops = (0..count).map(|_| random_drop(&mut self.rng, cell)).collect();
     }
 
