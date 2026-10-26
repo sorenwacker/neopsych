@@ -609,8 +609,13 @@ fn random_field(r: &mut Rng, modes: &[u32]) -> FieldJob {
             [0.0; 4],
         ),
     };
-    // Wipes (see `revealed` in field.wgsl): 0 dissolve, 1 growing circle, 3 blinds.
+    // Wipes (see `revealed` in field.wgsl): mostly 0, the dissolve that reads
+    // as a transparent blend; sometimes 1, a growing circle, or 3, blinds.
     // 2, the clock-hand sweep, is left out.
-    let wipe = [0, 1, 3][r.below(3) as usize];
+    let wipe = match r.below(20) {
+        0..=13 => 0,
+        14..=16 => 1,
+        _ => 3,
+    };
     FieldJob { mode, wipe, progress: 0.0, seed: r.below(1 << 20) as f32, a, b, c }
 }
