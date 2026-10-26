@@ -9,8 +9,9 @@ use crate::rng::Rng;
 use std::f32::consts::TAU;
 
 pub const MAX_OBJECTS: usize = 12;
-/// Chance that a random event starts a shower of glyph rain (or ends one).
-const RAIN_CHANCE: f32 = 0.1;
+/// Seconds between glyph rain showers, and how long one lasts.
+const RAIN_EVERY: (f32, f32) = (420.0, 780.0);
+const RAIN_LASTS: (f32, f32) = (20.0, 40.0);
 /// Where a finished rain drop is parked until it is removed.
 const GONE: f32 = 100.0;
 /// Every object can be drawn up to this many times by symmetry.
@@ -186,6 +187,8 @@ pub struct Director {
     objects: Vec<Object>,
     /// Glyph rain columns, kept apart so events never swap them for objects.
     drops: Vec<Object>,
+    /// When the current shower ends, or the next one starts.
+    rain_switch: f64,
     pal_from: Palette,
     pal_to: Palette,
     pal_start: f64,
@@ -238,6 +241,7 @@ impl Director {
             field_active: false,
             objects: Vec::new(),
             drops: Vec::new(),
+            rain_switch: 0.0,
             pal_from: pal,
             pal_to: pal,
             pal_start: 0.0,
@@ -250,6 +254,7 @@ impl Director {
             new_image: false,
         };
         d.start_preset(preset, 0.0);
+        d.rain_switch = d.order.range(RAIN_EVERY.0, RAIN_EVERY.1) as f64;
         d
     }
 
@@ -279,6 +284,16 @@ impl Director {
         }
         if t >= self.next_event {
             self.event(t);
+        }
+        // Glyph rain on its own clock, independent of presets.
+        if t >= self.rain_switch {
+            if self.raining() {
+                self.stop_rain();
+                self.rain_switch = t + self.order.range(RAIN_EVERY.0, RAIN_EVERY.1) as f64;
+            } else {
+                self.start_rain();
+                self.rain_switch = t + self.order.range(RAIN_LASTS.0, RAIN_LASTS.1) as f64;
+            }
         }
         // A fresh background now and then within the preset, sometimes a picture.
         if t >= self.next_field {
@@ -379,8 +394,6 @@ impl Director {
         let limit = MAX_OBJECTS * MAX_COPIES / copies;
         self.objects = (0..count.min(limit)).map(|_| random_object(r, recipe, theme)).collect();
 
-        // Rain from the last preset finishes falling; new showers come from events.
-        self.stop_rain();
 
         // Blend from whatever is showing into the preset's own palette.
         self.pal_from = self.current_palette(t);
@@ -476,15 +489,11 @@ impl Director {
         self.next_field = t + (self.transition_seconds * r.range(0.67, 1.33)) as f64;
     }
 
-    /// Small surprises within a preset: start or end a rain shower, reverse
-    /// the cycling, change its pace, or swap one object for a new one.
+    /// Small surprises within a preset: reverse the cycling, change its pace,
+    /// or swap one object for a new one.
     fn event(&mut self, t: f64) {
-        self.next_event = t + self.rng.range(4.0, 12.0) as f64;
-        if self.rng.chance(RAIN_CHANCE) {
-            self.toggle_rain();
-            return;
-        }
         let r = &mut self.rng;
+        self.next_event = t + r.range(4.0, 12.0) as f64;
         match r.below(3) {
             0 => self.speed_target = -self.speed_target,
             1 => self.speed_target = self.speed_target.signum() * r.range(self.recipe.cycle.0, self.recipe.cycle.1),
