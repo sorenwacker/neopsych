@@ -7,7 +7,8 @@ struct View {
     scale: u32,
     smoothing: u32,
     offset: f32,
-    _p0: f32,
+    // How far the front buffer has faded in over the back one, 0..1.
+    blend: f32,
     _p1: f32,
     _p2: f32,
 };
@@ -17,6 +18,14 @@ struct View {
 @group(0) @binding(2) var pal: texture_2d<f32>;
 // Repeat addressing wraps the palette; linear filtering blends neighbours.
 @group(0) @binding(3) var pal_sampler: sampler;
+// The previous background, fading out during a transition.
+@group(0) @binding(4) var<storage, read> back: array<u32>;
+
+fn color(ph: u32) -> vec4<f32> {
+    let x = f32(ph & 0xFFFFu) / 65536.0;
+    // Entry i sits at texel centre (i + 0.5) / 256.
+    return textureSampleLevel(pal, pal_sampler, vec2<f32>(x + V.offset + 0.5 / 256.0, 0.5), 0.0);
+}
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -27,7 +36,11 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let px = min(vec2<u32>(pos.xy) / V.scale, V.size - 1u);
-    let ph = f32(phase[px.y * V.size.x + px.x] & 0xFFFFu) / 65536.0;
-    // Entry i sits at texel centre (i + 0.5) / 256.
-    return textureSampleLevel(pal, pal_sampler, vec2<f32>(ph + V.offset + 0.5 / 256.0, 0.5), 0.0);
+    let i = px.y * V.size.x + px.x;
+    let front = color(phase[i]);
+    // Outside transitions the back buffer is not read at all.
+    if (V.blend >= 1.0) {
+        return front;
+    }
+    return mix(color(back[i]), front, V.blend);
 }

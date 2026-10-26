@@ -32,11 +32,12 @@ impl Symmetry {
     }
 }
 
-/// A full-screen pattern, revealed with a wipe while progress goes 0 -> 1.
+/// A full-screen pattern, blended in over the old one while progress goes 0 -> 1.
 #[derive(Clone, Copy)]
 pub struct FieldJob {
     pub mode: u32,
-    pub wipe: u32,
+    /// New for every background, so the renderer knows when to draw one.
+    pub id: u32,
     pub progress: f32,
     pub seed: f32,
     pub a: [f32; 4],
@@ -482,9 +483,10 @@ impl Director {
     /// Starts revealing a new background pattern from the preset's list.
     fn new_field(&mut self, t: f64) {
         let r = &mut self.rng;
-        self.field = random_field(r, self.recipe.fields);
+        let id = self.field.id.wrapping_add(1);
+        self.field = FieldJob { id, ..random_field(r, self.recipe.fields) };
         self.field_start = t;
-        self.field_dur = r.range(1.5, 4.0);
+        self.field_dur = r.range(2.0, 5.0);
         self.field_active = true;
         self.next_field = t + (self.transition_seconds * r.range(0.67, 1.33)) as f64;
     }
@@ -609,13 +611,5 @@ fn random_field(r: &mut Rng, modes: &[u32]) -> FieldJob {
             [0.0; 4],
         ),
     };
-    // Wipes (see `revealed` in field.wgsl): mostly 0, the dissolve that reads
-    // as a transparent blend; sometimes 1, a growing circle, or 3, blinds.
-    // 2, the clock-hand sweep, is left out.
-    let wipe = match r.below(20) {
-        0..=13 => 0,
-        14..=16 => 1,
-        _ => 3,
-    };
-    FieldJob { mode, wipe, progress: 0.0, seed: r.below(1 << 20) as f32, a, b, c }
+    FieldJob { mode, id: 0, progress: 0.0, seed: r.below(1 << 20) as f32, a, b, c }
 }

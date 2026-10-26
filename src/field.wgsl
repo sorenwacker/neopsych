@@ -1,6 +1,6 @@
-// Writes the pattern buffer. Each u32 holds a palette phase; the low 16 bits
-// are a fraction of one full palette cycle. Runs only while a pattern is being
-// revealed or a brush is stamping, never as a steady per-frame cost.
+// Writes a pattern buffer. Each u32 holds a palette phase; the low 16 bits
+// are a fraction of one full palette cycle. A background is drawn once, when
+// it arrives; after that only object stamps touch the buffer.
 
 struct Params {
     size: vec2<u32>,
@@ -84,18 +84,6 @@ fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
             let lum = textureSampleLevel(picture, picture_sampler, uv, 0.0).r;
             return lum * P.a.x + P.a.y;
         }
-    }
-}
-
-fn revealed(px: vec2<u32>, p: vec2<f32>) -> bool {
-    if (P.progress >= 1.0) {
-        return true;
-    }
-    switch P.wipe {
-        case 0u: { return hash(px, u32(P.seed)) < P.progress; }
-        case 1u: { return length(p) / 2.1 < P.progress; }
-        case 2u: { return (atan2(p.y, p.x) + 3.14159265) / TAU < P.progress; }
-        default: { return fract(p.y * 6.0) < P.progress; }
     }
 }
 
@@ -209,7 +197,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         return;
     }
-    if (revealed(px, p)) {
-        phase[i] = u32(fract(field(p, px)) * 65536.0) & 0xFFFFu;
-    }
+    phase[i] = u32(fract(field(p, px)) * 65536.0) & 0xFFFFu;
 }
