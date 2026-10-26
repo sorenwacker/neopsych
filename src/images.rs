@@ -1,5 +1,5 @@
-//! Picks random pictures from a folder and decodes them to greyscale on a
-//! background thread, always keeping one ready so showing it never stalls.
+//! Picks random pictures from a folder tree and decodes them to greyscale on
+//! a background thread, always keeping one ready so showing it never stalls.
 
 use crate::rng::Rng;
 use std::path::{Path, PathBuf};
@@ -15,52 +15,45 @@ pub struct Gray {
 }
 
 pub struct Images {
-    files: Vec<PathBuf>,
-    rng: Rng,
-    requests: Sender<PathBuf>,
-    results: Receiver<Option<Gray>>,
+    requests: Sender<()>,
+    results: Receiver<Gray>,
     in_flight: bool,
     ready: Option<Gray>,
 }
 
 impl Images {
-    /// None if the folder has no usable pictures.
-    pub fn open(folder: &Path, seed: u64) -> Option<Images> {
-        let files: Vec<PathBuf> = std::fs::read_dir(folder)
-            .ok()?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-                matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp")
-            })
-            .collect();
-        if files.is_empty() {
-            return None;
-        }
-        let (requests, jobs) = channel::<PathBuf>();
+    /// Starts scanning `folder` and its subfolders in the background. If no
+    /// pictures turn up, none ever become ready and patterns are shown instead.
+    pub fn open(folder: &Path, seed: u64) -> Images {
+        let (requests, jobs) = channel::<()>();
         let (done, results) = channel();
+        let folder = folder.to_path_buf();
         std::thread::spawn(move || {
-            for path in jobs {
-                if done.send(decode(&path)).is_err() {
-                    break;
+            let files = scan(&folder);
+            if files.is_empty() {
+                return;
+            }
+            let mut rng = Rng::new(seed);
+            for () in jobs {
+                // Skip unreadable files, but give up rather than spin if none decode.
+                let picture = (0..20).find_map(|_| decode(&files[rng.below(files.len() as u32) as usize]));
+                let Some(picture) = picture else { return };
+                if done.send(picture).is_err() {
+                    return;
                 }
             }
         });
-        let mut images = Images { files, rng: Rng::new(seed), requests, results, in_flight: false, ready: None };
+        let mut images = Images { requests, results, in_flight: false, ready: None };
         images.prefetch();
-        Some(images)
+        images
     }
 
     /// True once a picture is decoded and waiting.
     pub fn poll(&mut self) -> bool {
         if self.ready.is_none() && self.in_flight {
-            if let Ok(result) = self.results.try_recv() {
+            if let Ok(img) = self.results.try_recv() {
                 self.in_flight = false;
-                match result {
-                    Some(img) => self.ready = Some(img),
-                    // Unreadable file: try another.
-                    None => self.prefetch(),
-                }
+                self.ready = Some(img);
             }
         }
         self.ready.is_some()
@@ -74,12 +67,32 @@ impl Images {
     }
 
     fn prefetch(&mut self) {
-        if self.in_flight {
-            return;
+        if !self.in_flight {
+            self.in_flight = self.requests.send(()).is_ok();
         }
-        let path = self.files[self.rng.below(self.files.len() as u32) as usize].clone();
-        self.in_flight = self.requests.send(path).is_ok();
     }
+}
+
+/// Every picture file under `root`, following subfolders but not links.
+fn scan(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            let path = entry.path();
+            if kind.is_dir() {
+                dirs.push(path);
+            } else if kind.is_file() {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    files
 }
 
 fn decode(path: &Path) -> Option<Gray> {
@@ -93,8 +106,8 @@ fn decode(path: &Path) -> Option<Gray> {
     Some(Gray { width: gray.width(), height: gray.height(), pixels: gray.into_raw() })
 }
 
-/// Pictures\Wallpapers in the user's home, used when no folder is configured.
+/// The user's Pictures folder, used when no folder is configured.
 pub fn default_folder() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default();
-    PathBuf::from(home).join("Pictures").join("Wallpapers")
+    PathBuf::from(home).join("Pictures")
 }

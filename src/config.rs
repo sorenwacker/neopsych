@@ -66,8 +66,8 @@ transition_seconds = 15
 # 0 = play all 120 presets in random order, 1-120 = stay on one
 preset = 0
 
-# folder of pictures shown in the current palette now and then
-# (empty = Pictures\\Wallpapers in your user folder)
+# folder of pictures shown in the current palette, subfolders included
+# (empty = the Pictures folder in your user folder)
 image_folder =
 
 # chance (0 to 1) that a new background is a picture; 0 turns pictures off
