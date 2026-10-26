@@ -18,6 +18,8 @@ pub struct Config {
     pub preset: u32,
     /// Where to find pictures; None means images::default_folder.
     pub image_folder: Option<PathBuf>,
+    /// Also take pictures from folders inside image_folder.
+    pub image_subfolders: bool,
     /// Chance that a preset opens with a picture instead of a pattern.
     pub image_chance: f32,
 }
@@ -34,6 +36,7 @@ impl Default for Config {
             transition_seconds: 15.0,
             preset: 0,
             image_folder: None,
+            image_subfolders: false,
             image_chance: 0.9,
         }
     }
@@ -66,9 +69,12 @@ transition_seconds = 15
 # 0 = play all 120 presets in random order, 1-120 = stay on one
 preset = 0
 
-# folder of pictures shown in the current palette, subfolders included
+# folder of pictures shown in the current palette
 # (empty = the Pictures folder in your user folder)
 image_folder =
+
+# true = also use pictures in folders inside it
+image_subfolders = false
 
 # chance (0 to 1) that a new background is a picture; 0 turns pictures off
 image_chance = 0.9
@@ -136,6 +142,7 @@ pub fn load() -> Config {
             }
             "preset" => c.preset = v.parse().unwrap_or(c.preset).min(crate::presets::COUNT as u32),
             "image_folder" => c.image_folder = (!v.is_empty()).then(|| PathBuf::from(v.trim_matches('"'))),
+            "image_subfolders" => c.image_subfolders = v.parse().unwrap_or(c.image_subfolders),
             "image_chance" => c.image_chance = v.parse().unwrap_or(c.image_chance).clamp(0.0, 1.0),
             _ => {}
         }

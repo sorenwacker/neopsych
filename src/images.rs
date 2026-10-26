@@ -1,4 +1,4 @@
-//! Picks random pictures from a folder tree and decodes them to greyscale on
+//! Picks random pictures from a folder (optionally with its subfolders) and decodes them to greyscale on
 //! a background thread, always keeping one ready so showing it never stalls.
 
 use crate::rng::Rng;
@@ -24,12 +24,12 @@ pub struct Images {
 impl Images {
     /// Starts scanning `folder` and its subfolders in the background. If no
     /// pictures turn up, none ever become ready and patterns are shown instead.
-    pub fn open(folder: &Path, seed: u64) -> Images {
+    pub fn open(folder: &Path, subfolders: bool, seed: u64) -> Images {
         let (requests, jobs) = channel::<()>();
         let (done, results) = channel();
         let folder = folder.to_path_buf();
         std::thread::spawn(move || {
-            let files = scan(&folder);
+            let files = scan(&folder, subfolders);
             if files.is_empty() {
                 return;
             }
@@ -73,8 +73,8 @@ impl Images {
     }
 }
 
-/// Every picture file under `root`, following subfolders but not links.
-fn scan(root: &Path) -> Vec<PathBuf> {
+/// Every picture file in `root`, and in its subfolders if asked (not following links).
+fn scan(root: &Path, subfolders: bool) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
@@ -83,7 +83,9 @@ fn scan(root: &Path) -> Vec<PathBuf> {
             let Ok(kind) = entry.file_type() else { continue };
             let path = entry.path();
             if kind.is_dir() {
-                dirs.push(path);
+                if subfolders {
+                    dirs.push(path);
+                }
             } else if kind.is_file() {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
                 if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp") {

@@ -112,7 +112,7 @@ impl App {
             Director::new(seed, cfg.speed, cfg.motion, cfg.preset_seconds, cfg.transition_seconds, fixed, cfg.image_chance);
         let images = if cfg.image_chance > 0.0 {
             let folder = cfg.image_folder.clone().unwrap_or_else(images::default_folder);
-            Some(Images::open(&folder, seed))
+            Some(Images::open(&folder, cfg.image_subfolders, seed))
         } else {
             None
         };
