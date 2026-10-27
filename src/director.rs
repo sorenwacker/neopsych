@@ -160,6 +160,10 @@ pub struct Director {
     order: Rng,
     /// Drives everything inside a preset; seeded from the preset.
     rng: Rng,
+    /// Picks the preset's backgrounds. Kept apart from `rng` because a
+    /// background can wait for a fade, and the wait must not change what
+    /// else the preset draws.
+    field_rng: Rng,
     speed_mult: f32,
     motion_mult: f32,
     preset_seconds: f32,
@@ -220,6 +224,7 @@ impl Director {
         let mut d = Director {
             order,
             rng,
+            field_rng: Rng::new(pseed),
             speed_mult,
             motion_mult,
             preset_seconds,
@@ -297,7 +302,7 @@ impl Director {
         }
         // A fresh background now and then within the preset, sometimes a picture.
         if t >= self.next_field && !self.field_active {
-            let picture = self.image_ready && self.order.chance(self.image_chance);
+            let picture = self.roll_picture();
             self.begin_background(t, picture);
         }
         // The palette is always on its way to the next one.
@@ -353,12 +358,12 @@ impl Director {
         self.recipe = recipe;
         self.name = name;
         self.rng = Rng::new(seed);
+        self.field_rng = Rng::new(seed ^ 0xF1E1D);
         self.preset_start = t;
         self.preset_end = t + self.preset_seconds as f64;
         self.next_event = t + self.rng.range(4.0, 12.0) as f64;
 
-        // Decided with the order rng so the preset's own sequence is unchanged.
-        let picture = self.image_ready && self.order.chance(self.image_chance);
+        let picture = self.roll_picture();
         self.begin_background(t, picture);
 
         let r = &mut self.rng;
@@ -390,7 +395,6 @@ impl Director {
         let limit = MAX_OBJECTS * MAX_COPIES / copies;
         self.objects = (0..count.min(limit)).map(|_| random_object(r, recipe, theme)).collect();
 
-
         // Blend from whatever is showing into the preset's own palette.
         self.pal_from = self.current_palette(t);
         self.pal_to = palette::random_of(&mut self.rng, recipe.palettes);
@@ -411,11 +415,18 @@ impl Director {
         }
     }
 
+    /// Whether the next background should be a picture. Decided with the
+    /// order rng so the preset's own sequence is unchanged.
+    fn roll_picture(&mut self) -> bool {
+        self.image_ready && self.order.chance(self.image_chance)
+    }
+
     /// Starts fading in a new pattern, or a picture. One already fading in
     /// is never cut short: the new one waits and starts when it is done.
+    /// Only one waits; if a picture was asked for meanwhile, it is a picture.
     fn begin_background(&mut self, t: f64, picture: bool) {
         if self.field_active {
-            self.queued = Some(picture);
+            self.queued = Some(picture || self.queued == Some(true));
             return;
         }
         self.new_field(t);
@@ -489,7 +500,7 @@ impl Director {
 
     /// Starts revealing a new background pattern from the preset's list.
     fn new_field(&mut self, t: f64) {
-        let r = &mut self.rng;
+        let r = &mut self.field_rng;
         let id = self.field.id.wrapping_add(1);
         self.field = FieldJob { id, ..random_field(r, self.recipe.fields) };
         self.field_start = t;

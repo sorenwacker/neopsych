@@ -277,9 +277,17 @@ impl ApplicationHandler for App {
                     el.exit();
                     return;
                 }
-                // Holding a letter key down must not fire it again and again;
-                // arrows and +/- may repeat.
-                if event.repeat && matches!(&event.logical_key, Key::Character(c) if !matches!(c.as_str(), "+" | "-" | "=")) {
+                // Holding a key down must not toggle things again and again;
+                // only the stepping keys (arrows, +/-) may repeat.
+                let steps = match &event.logical_key {
+                    Key::Named(k) => matches!(
+                        k,
+                        NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::ArrowUp | NamedKey::ArrowDown
+                    ),
+                    Key::Character(c) => matches!(c.as_str(), "+" | "-" | "="),
+                    _ => false,
+                };
+                if event.repeat && !steps {
                     return;
                 }
                 let t = self.clock;
