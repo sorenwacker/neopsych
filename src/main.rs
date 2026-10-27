@@ -37,6 +37,13 @@ enum Mode {
     Windowed { fullscreen: bool },
 }
 
+impl Mode {
+    /// Run by hand rather than by Windows: hotkeys work and input doesn't quit.
+    fn interactive(self) -> bool {
+        matches!(self, Mode::Windowed { .. })
+    }
+}
+
 const HOTKEYS: &str = "H hotkeys · Left/Right preset · Up/Down movement · Space pause · F fullscreen · Esc quit";
 
 const HELP: &str = "\
@@ -93,8 +100,9 @@ struct App {
     last: Instant,
     next_frame: Instant,
     cursor_origin: HashMap<WindowId, PhysicalPosition<f64>>,
-    /// Frames rendered since the last report; enabled by NEOPSYCH_STATS.
-    stats: Option<(u32, Instant)>,
+    /// Frame rate log: the file named by NEOPSYCH_STATS, and frames
+    /// rendered since the last line written to it.
+    stats: Option<(std::ffi::OsString, u32, Instant)>,
     vsync_paced: bool,
     /// Preset name last shown in the window title.
     title: String,
@@ -108,8 +116,15 @@ impl App {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1);
         let fixed = (cfg.preset > 0).then(|| cfg.preset as usize - 1);
-        let director =
-            Director::new(seed, cfg.speed, cfg.motion, cfg.preset_seconds, cfg.transition_seconds, fixed, cfg.image_chance);
+        let director = Director::new(
+            seed,
+            cfg.speed,
+            cfg.motion,
+            cfg.preset_seconds,
+            cfg.transition_seconds,
+            fixed,
+            cfg.image_chance,
+        );
         let images = if cfg.image_chance > 0.0 {
             let folder = cfg.image_folder.clone().unwrap_or_else(images::default_folder);
             Some(Images::open(&folder, cfg.image_subfolders, seed))
@@ -129,7 +144,7 @@ impl App {
             last: now,
             next_frame: now,
             cursor_origin: HashMap::new(),
-            stats: std::env::var_os("NEOPSYCH_STATS").map(|_| (0, now)),
+            stats: std::env::var_os("NEOPSYCH_STATS").map(|path| (path, 0, now)),
             vsync_paced: false,
             title: String::new(),
             images,
@@ -144,11 +159,8 @@ impl App {
                 .filter_map(|m| {
                     // Always-on-top and fullscreen are applied once the surface
                     // is configured: DX12 rejects a surface on a window created topmost.
-                    let attrs = base
-                        .clone()
-                        .with_decorations(false)
-                        .with_position(m.position())
-                        .with_inner_size(m.size());
+                    let attrs =
+                        base.clone().with_decorations(false).with_position(m.position()).with_inner_size(m.size());
                     el.create_window(attrs).ok()
                 })
                 .collect(),
@@ -184,22 +196,20 @@ impl App {
         for t in &mut self.targets {
             t.render(gpu, &frame);
         }
-        if matches!(self.mode, Mode::Windowed { .. }) && self.title != self.director.name() {
+        if self.mode.interactive() && self.title != self.director.name() {
             self.title = self.director.name().to_string();
             for t in &self.targets {
                 t.window.set_title(&format!("neopsych - {}   |   {HOTKEYS}", self.title));
             }
         }
-        if let Some(s) = &mut self.stats {
-            s.0 += 1;
-            if now - s.1 >= Duration::from_secs(2) {
-                let line = format!("{:.1} fps\n", s.0 as f64 / (now - s.1).as_secs_f64());
-                if let Some(path) = std::env::var_os("NEOPSYCH_STATS") {
-                    use std::io::Write;
-                    let f = std::fs::OpenOptions::new().create(true).append(true).open(path);
-                    let _ = f.and_then(|mut f| f.write_all(line.as_bytes()));
-                }
-                *s = (0, now);
+        if let Some((path, frames, since)) = &mut self.stats {
+            *frames += 1;
+            if now - *since >= Duration::from_secs(2) {
+                use std::io::Write;
+                let line = format!("{:.1} fps\n", *frames as f64 / (now - *since).as_secs_f64());
+                let f = std::fs::OpenOptions::new().create(true).append(true).open(&*path);
+                let _ = f.and_then(|mut f| f.write_all(line.as_bytes()));
+                (*frames, *since) = (0, now);
             }
         }
     }
@@ -208,7 +218,7 @@ impl App {
 impl ApplicationHandler for App {
     /// Keeps speed changes made with hotkeys for next time.
     fn exiting(&mut self, _: &ActiveEventLoop) {
-        if !matches!(self.mode, Mode::Windowed { .. }) {
+        if !self.mode.interactive() {
             return;
         }
         let (speed, motion) = self.director.speeds();
@@ -230,18 +240,12 @@ impl ApplicationHandler for App {
         let mut surfaces = Vec::new();
         for w in windows {
             let w = Arc::new(w);
-            if self.mode == Mode::Saver {
-                w.set_cursor_visible(false);
-            }
             let surface = instance.create_surface(w.clone()).expect("failed to create surface");
             surfaces.push((w, surface));
         }
         // Highest refresh rate among our monitors; unknown counts as 60 Hz.
-        let refresh_mhz = surfaces
-            .iter()
-            .filter_map(|(w, _)| w.current_monitor()?.refresh_rate_millihertz())
-            .max()
-            .unwrap_or(60_000);
+        let refresh_mhz =
+            surfaces.iter().filter_map(|(w, _)| w.current_monitor()?.refresh_rate_millihertz()).max().unwrap_or(60_000);
         self.vsync_paced = self.cfg.fps * 1000 + 1000 >= refresh_mhz;
         let gpu = Gpu::new(instance, &surfaces[0].1);
         for (w, s) in surfaces {
@@ -255,7 +259,7 @@ impl ApplicationHandler for App {
             }
             // Started from another program the window may open without
             // keyboard focus, and then hotkeys go nowhere.
-            if matches!(self.mode, Mode::Windowed { .. }) {
+            if self.mode.interactive() {
                 w.focus_window();
             }
             self.targets.push(target);
@@ -309,8 +313,8 @@ impl ApplicationHandler for App {
                         "m" => d.next_symmetry(),
                         "g" => d.toggle_rain(),
                         "r" => d.reverse(),
-                        "+" | "=" => d.scale_speed(1.25),
-                        "-" => d.scale_speed(0.8),
+                        "+" | "=" => d.scale_cycle(1.25),
+                        "-" => d.scale_cycle(0.8),
                         "f" => self.toggle_fullscreen(id),
                         "h" => show_help(),
                         _ => {}
@@ -329,7 +333,7 @@ impl ApplicationHandler for App {
                 if up != 0.0 {
                     let factor = if up > 0.0 { 1.15 } else { 1.0 / 1.15 };
                     if self.shift {
-                        self.director.scale_speed(factor);
+                        self.director.scale_cycle(factor);
                     } else {
                         self.director.scale_motion(factor);
                     }
@@ -342,7 +346,6 @@ impl ApplicationHandler for App {
                     el.exit();
                 }
             }
-            WindowEvent::RedrawRequested => {}
             _ => {}
         }
     }

@@ -1,3 +1,4 @@
+use crate::presets::{COSINE, GUNS, HARD_BANDS, RAINBOW, SOFT_BANDS};
 use crate::rng::Rng;
 use std::f32::consts::TAU;
 
@@ -9,17 +10,22 @@ const MIN_BRIGHTNESS: f32 = 0.45;
 
 /// A random palette in one of the given styles (see presets::COSINE etc.).
 pub fn random_of(rng: &mut Rng, styles: &[u32]) -> Palette {
-    let mut p = match styles[rng.below(styles.len() as u32) as usize] {
-        0 => cosine(rng),
-        1 => bands(rng, false),
-        2 => bands(rng, true),
-        3 => rainbow(rng),
-        _ => guns(rng),
+    let mut p = match rng.pick(styles) {
+        COSINE => cosine(rng),
+        SOFT_BANDS => bands(rng, false),
+        HARD_BANDS => bands(rng, true),
+        RAINBOW => rainbow(rng),
+        GUNS => guns(rng),
+        other => unreachable!("palette style {other}"),
     };
     lift(&mut p);
     p
 }
 
+/// Smooth 0..1 -> 0..1 easing, flat at both ends.
+pub fn ease(x: f32) -> f32 {
+    x * x * (3.0 - 2.0 * x)
+}
 
 /// Brightens dark entries while keeping their hue.
 fn lift(p: &mut Palette) {
@@ -49,9 +55,9 @@ fn guns(rng: &mut Rng) -> Palette {
             let x = freq * t(i) + ph;
             e[k] = gain
                 * match kind {
-                    0..=1 => 1.0 - x.fract(),                              // ramp
-                    2..=3 => (std::f32::consts::PI * x).sin().powi(2),     // fade
-                    4..=6 => 0.5 + 0.5 * (TAU * x).cos(),                  // smooth
+                    0..=1 => 1.0 - x.fract(),                               // ramp
+                    2..=3 => (std::f32::consts::PI * x).sin().powi(2),      // fade
+                    4..=6 => 0.5 + 0.5 * (TAU * x).cos(),                   // smooth
                     _ => coarse(&knots, x) * (0.5 + 0.5 * (TAU * x).cos()), // coarse
                 };
         }
@@ -64,8 +70,7 @@ fn coarse(knots: &[f32], x: f32) -> f32 {
     let n = knots.len();
     let y = x.rem_euclid(1.0) * n as f32;
     let i = y as usize % n;
-    let f = y.fract();
-    let f = f * f * (3.0 - 2.0 * f);
+    let f = ease(y.fract());
     knots[i] + (knots[(i + 1) % n] - knots[i]) * f
 }
 
@@ -109,14 +114,12 @@ fn cosine(rng: &mut Rng) -> Palette {
 /// A ring of vivid colour stops, blended softly or with hard edges.
 fn bands(rng: &mut Rng, hard: bool) -> Palette {
     let n = 3 + rng.below(6) as usize;
-    let stops: Vec<[f32; 3]> =
-        (0..n).map(|_| hsv(rng.f(), rng.range(0.6, 1.0), rng.range(0.75, 1.0))).collect();
+    let stops: Vec<[f32; 3]> = (0..n).map(|_| hsv(rng.f(), rng.range(0.6, 1.0), rng.range(0.75, 1.0))).collect();
     let mut p = [[0.0; 3]; 256];
     for (i, e) in p.iter_mut().enumerate() {
         let x = t(i) * n as f32;
         let j = x as usize % n;
-        let mut f = x.fract();
-        f = if hard { smoothstep(0.8, 1.0, f) } else { f * f * (3.0 - 2.0 * f) };
+        let f = if hard { smoothstep(0.8, 1.0, x.fract()) } else { ease(x.fract()) };
         let (a, b) = (stops[j], stops[(j + 1) % n]);
         for k in 0..3 {
             e[k] = a[k] + (b[k] - a[k]) * f;
@@ -140,8 +143,7 @@ fn rainbow(rng: &mut Rng) -> Palette {
 }
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+    ease(((x - e0) / (e1 - e0)).clamp(0.0, 1.0))
 }
 
 fn hsv(h: f32, s: f32, v: f32) -> [f32; 3] {

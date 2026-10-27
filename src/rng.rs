@@ -3,7 +3,7 @@ pub struct Rng(u64);
 
 impl Rng {
     pub fn new(seed: u64) -> Self {
-        Rng(seed ^ 0x9E37_79B9_7F4A_7C15 | 1)
+        Rng((seed ^ 0x9E37_79B9_7F4A_7C15) | 1)
     }
 
     pub fn next_u64(&mut self) -> u64 {
@@ -31,6 +31,11 @@ impl Rng {
     /// Integer in [lo, hi] returned as f32, for shader params that must be whole.
     pub fn int(&mut self, lo: i32, hi: i32) -> f32 {
         (lo + self.below((hi - lo + 1) as u32) as i32) as f32
+    }
+
+    /// A random element of a non-empty slice.
+    pub fn pick<T: Copy>(&mut self, items: &[T]) -> T {
+        items[self.below(items.len() as u32) as usize]
     }
 
     pub fn chance(&mut self, p: f32) -> bool {

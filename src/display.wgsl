@@ -5,10 +5,10 @@
 struct View {
     size: vec2<u32>,
     scale: u32,
-    smoothing: u32,
     offset: f32,
     // How far the front buffer has faded in over the back one, 0..1.
     blend: f32,
+    _p0: f32,
     _p1: f32,
     _p2: f32,
 };

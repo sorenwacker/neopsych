@@ -134,12 +134,10 @@ pub fn load() -> Config {
             "pixel_scale" => c.pixel_scale = v.parse().unwrap_or(c.pixel_scale).clamp(1, 16),
             "fps" => c.fps = v.parse().unwrap_or(c.fps).clamp(5, 240),
             "smooth" => c.smooth = v.parse().unwrap_or(c.smooth),
-            "speed" => c.speed = v.parse().unwrap_or(c.speed),
+            "speed" => c.speed = v.parse().unwrap_or(c.speed).clamp(0.05, 20.0),
             "motion" => c.motion = v.parse().unwrap_or(c.motion).clamp(0.05, 20.0),
             "preset_seconds" => c.preset_seconds = v.parse().unwrap_or(c.preset_seconds).max(5.0),
-            "transition_seconds" => {
-                c.transition_seconds = v.parse().unwrap_or(c.transition_seconds).max(3.0)
-            }
+            "transition_seconds" => c.transition_seconds = v.parse().unwrap_or(c.transition_seconds).max(3.0),
             "preset" => c.preset = v.parse().unwrap_or(c.preset).min(crate::presets::COUNT as u32),
             "image_folder" => c.image_folder = (!v.is_empty()).then(|| PathBuf::from(v.trim_matches('"'))),
             "image_subfolders" => c.image_subfolders = v.parse().unwrap_or(c.image_subfolders),

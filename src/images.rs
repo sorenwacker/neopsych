@@ -22,8 +22,8 @@ pub struct Images {
 }
 
 impl Images {
-    /// Starts scanning `folder` and its subfolders in the background. If no
-    /// pictures turn up, none ever become ready and patterns are shown instead.
+    /// Starts scanning `folder` (and its subfolders if asked) in the background.
+    /// If no pictures turn up, none ever become ready and patterns are shown instead.
     pub fn open(folder: &Path, subfolders: bool, seed: u64) -> Images {
         let (requests, jobs) = channel::<()>();
         let (done, results) = channel();

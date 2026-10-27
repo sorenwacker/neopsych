@@ -14,7 +14,7 @@ pub const POLYGON: u32 = 7;
 pub const SLAB: u32 = 8; // filled polygon
 pub const CROSS: u32 = 9;
 /// One cell of glyph rain: a random blocky glyph on a fixed grid. Only used
-/// for rain drops, which the director adds to some presets.
+/// for rain drops, which the director adds now and then on its own clock.
 pub const GLYPH: u32 = 10;
 const ALL_SHAPES: &[u32] = &[RING, DISC, SQUARE, STICK, TILE, FLOWER, STAR, POLYGON, SLAB, CROSS];
 
@@ -39,7 +39,7 @@ pub const RAINBOW: u32 = 3;
 pub const GUNS: u32 = 4;
 const ALL_PALETTES: &[u32] = &[COSINE, SOFT_BANDS, HARD_BANDS, RAINBOW, GUNS];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum MotionStyle {
     Bounce,
     Orbit,
@@ -149,14 +149,7 @@ pub const FAMILIES: &[Recipe] = &[
         motion: MotionStyle::Orbit,
         ..BASE
     },
-    Recipe {
-        name: "Moire Bubbles",
-        fields: &[MOIRE],
-        shapes: &[DISC],
-        count: (3, 8),
-        radius: (0.03, 0.15),
-        ..BASE
-    },
+    Recipe { name: "Moire Bubbles", fields: &[MOIRE], shapes: &[DISC], count: (3, 8), radius: (0.03, 0.15), ..BASE },
     Recipe { name: "Tunnel Flowers", fields: &[TUNNEL], shapes: &[FLOWER, STAR], count: (2, 5), ..BASE },
     Recipe {
         name: "Grid Sparks",
@@ -219,15 +212,7 @@ pub const FAMILIES: &[Recipe] = &[
         sides: (3, 3),
         ..BASE
     },
-    Recipe {
-        name: "Hex Hive",
-        shapes: &[SLAB],
-        count: (4, 9),
-        radius: (0.03, 0.12),
-        grad: 0.9,
-        sides: (6, 6),
-        ..BASE
-    },
+    Recipe { name: "Hex Hive", shapes: &[SLAB], count: (4, 9), radius: (0.03, 0.12), grad: 0.9, sides: (6, 6), ..BASE },
     Recipe { name: "Polygon Parade", shapes: &[POLYGON, SLAB], count: (4, 8), sides: (3, 8), ..BASE },
     Recipe {
         name: "Cross Fire",
@@ -243,7 +228,7 @@ pub const FAMILIES: &[Recipe] = &[
 pub const VARIATIONS: usize = 5;
 pub const COUNT: usize = FAMILIES.len() * VARIATIONS;
 
-/// Preset index 0..100 -> its family recipe, display name and fixed seed.
+/// Preset index 0..COUNT -> its family recipe, display name and fixed seed.
 pub fn get(index: usize) -> (&'static Recipe, String, u64) {
     let index = index % COUNT;
     let family = &FAMILIES[index / VARIATIONS];

@@ -6,9 +6,9 @@ struct Params {
     size: vec2<u32>,
     origin: vec2<u32>,
     mode: u32,
-    wipe: u32,
-    progress: f32,
-    seed: f32,
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
     a: vec4<f32>,
     b: vec4<f32>,
     c: vec4<f32>,
@@ -23,6 +23,7 @@ struct Params {
 @group(0) @binding(3) var picture_sampler: sampler;
 
 const TAU: f32 = 6.28318530718;
+// Params.mode for an object stamp; same as BRUSH_MODE in gpu.rs.
 const BRUSH_MODE: u32 = 100u;
 
 fn hash(p: vec2<u32>, s: u32) -> f32 {
@@ -43,9 +44,10 @@ fn rot(p: vec2<f32>, a: f32) -> vec2<f32> {
 
 // Pattern value in palette cycles; only the fractional part matters.
 // Multipliers of angle/TAU are whole numbers so there is no seam.
+// Modes are the PLASMA..IMAGE constants in presets.rs.
 fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
     switch P.mode {
-        case 0u: {
+        case 0u, default: {
             return (sin(p.x * P.a.x + P.a.y) + sin(p.y * P.a.z + P.a.w)
                 + sin((p.x + p.y) * P.b.x + P.b.y) + sin(length(p - P.b.zw) * P.c.x)) * P.c.y;
         }
@@ -79,7 +81,7 @@ fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
         }
         // picture, stretched to fill the screen: brightness picks the palette entry.
         // a.x = cycles across black..white, a.y = start.
-        default: {
+        case 7u: {
             let uv = (vec2<f32>(px) + 0.5) / vec2<f32>(P.size);
             let lum = textureSampleLevel(picture, picture_sampler, uv, 0.0).r;
             return lum * P.a.x + P.a.y;
@@ -90,7 +92,7 @@ fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
 // Object stamp at p: x = inside (1) or outside (0), y = 0..1 position across
 // the shape, used to spread a colour gradient over it.
 // shape = (x, y, radius, width), shape2 = (kind, colour, angle, gradient),
-// c = (lobes, -, -, -).
+// c = (lobes, -, -, -). Kinds are the RING..GLYPH constants in presets.rs.
 fn stamp(p: vec2<f32>) -> vec2<f32> {
     let s = P.shape;
     let q = p - s.xy;
@@ -137,7 +139,7 @@ fn stamp(p: vec2<f32>) -> vec2<f32> {
             let sector = TAU / n;
             let a = atan2(q.y, q.x) + P.shape2.z;
             let off = a - sector * (floor(a / sector) + 0.5);
-            let m = r * cos(off) / cos(3.14159265 / n);
+            let m = r * cos(off) / cos(sector * 0.5);
             if (u32(P.shape2.x) == 7u) {
                 let d = abs(m - s.z);
                 return vec2<f32>(select(0.0, 1.0, d < s.w), d / s.w);
@@ -168,7 +170,7 @@ fn stamp(p: vec2<f32>) -> vec2<f32> {
             return vec2<f32>(select(0.0, 1.0, bit), 0.0);
         }
         // star outline
-        default: {
+        case 6u, default: {
             let ang = atan2(q.y, q.x) + P.shape2.z;
             let d = abs(r - s.z * (0.55 + 0.45 * cos(ang * P.c.x)));
             return vec2<f32>(select(0.0, 1.0, d < s.w), d / s.w);
@@ -192,5 +194,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         return;
     }
-    phase[i] = u32(fract(field(p, px)) * 65536.0) & 0xFFFFu;
+    phase[i] = u32(fract(field(p, px)) * 65536.0);
 }

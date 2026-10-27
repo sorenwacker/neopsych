@@ -1,21 +1,26 @@
-use crate::director::{Brush, FieldJob, Frame, MAX_COPIES, MAX_OBJECTS};
+use crate::director::{Brush, FieldJob, Frame, MAX_STAMPS};
 use crate::images::Gray;
+use crate::presets::{CROSS, GLYPH, SQUARE, TILE};
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::{Window, WindowId};
 
+/// Params.mode for an object stamp rather than a background; same in field.wgsl.
 const BRUSH_MODE: u32 = 100;
+/// Side of a compute workgroup, as in field.wgsl's @workgroup_size.
+const WORKGROUP: u32 = 8;
+/// Entries in the palette texture.
+const PALETTE_SIZE: u32 = 256;
 
+/// Matches Params in field.wgsl.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Params {
     size: [u32; 2],
     origin: [u32; 2],
     mode: u32,
-    wipe: u32,
-    progress: f32,
-    seed: f32,
+    _pad: [u32; 3],
     a: [f32; 4],
     b: [f32; 4],
     c: [f32; 4],
@@ -23,15 +28,15 @@ struct Params {
     shape2: [f32; 4],
 }
 
+/// Matches View in display.wgsl.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct View {
     size: [u32; 2],
     scale: u32,
-    smoothing: u32,
     offset: f32,
     blend: f32,
-    _pad: [f32; 2],
+    _pad: [f32; 3],
 }
 
 /// Device plus the pipelines every window shares.
@@ -114,16 +119,17 @@ pub struct Target {
     pub window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    /// Screen pixels per pattern pixel; may end up above the configured one.
     scale: u32,
-    smoothing: bool,
     dims: [u32; 2],
     view_ubo: wgpu::Buffer,
     palette: wgpu::Texture,
     sampler: wgpu::Sampler,
-    /// Slot 0 is the background field, the rest one per object.
+    /// Slot 0 is the background field, the rest one per stamp (object copy).
     slots: Vec<Slot>,
     /// Two pattern buffers: objects draw into the front one, and a new
     /// background goes into the other, which then fades in and becomes the front.
+    /// Set by alloc, which always runs in new.
     phase: Vec<wgpu::Buffer>,
     front: usize,
     /// How far the front buffer has faded in, 0..1.
@@ -157,7 +163,7 @@ impl Target {
             if gpu.format.is_srgb() { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
         let palette = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("palette"),
-            size: wgpu::Extent3d { width: 256, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: PALETTE_SIZE, height: 1, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -179,7 +185,6 @@ impl Target {
             surface,
             config,
             scale,
-            smoothing,
             dims: [1, 1],
             view_ubo,
             palette,
@@ -227,7 +232,7 @@ impl Target {
             })
             .collect();
 
-        self.slots = (0..=MAX_OBJECTS * MAX_COPIES)
+        self.slots = (0..=MAX_STAMPS)
             .map(|_| {
                 let ubo = gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("params"),
@@ -235,7 +240,7 @@ impl Target {
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let bg = self.compute_bind_groups(gpu, &ubo);
+                let bg = compute_bind_groups(gpu, &ubo, &self.phase, &self.picture, &self.picture_sampler);
                 Slot { ubo, bg }
             })
             .collect();
@@ -265,30 +270,11 @@ impl Target {
         self.needs_full = true;
     }
 
-    /// Bind groups writing into pattern buffer 0 and 1 with this uniform buffer.
-    fn compute_bind_groups(&self, gpu: &Gpu, ubo: &wgpu::Buffer) -> [wgpu::BindGroup; 2] {
-        [0, 1].map(|k| {
-            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &gpu.field_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ubo.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.phase[k].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.picture) },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&self.picture_sampler),
-                    },
-                ],
-            })
-        })
-    }
-
     /// Replaces the picture used by the image field.
     pub fn set_picture(&mut self, gpu: &Gpu, img: &Gray) {
         self.picture = picture_texture(gpu, img.width, img.height, &img.pixels);
-        for i in 0..self.slots.len() {
-            self.slots[i].bg = self.compute_bind_groups(gpu, &self.slots[i].ubo);
+        for slot in &mut self.slots {
+            slot.bg = compute_bind_groups(gpu, &slot.ubo, &self.phase, &self.picture, &self.picture_sampler);
         }
     }
 
@@ -331,31 +317,24 @@ impl Target {
                 let slot = &self.slots[0];
                 gpu.queue.write_buffer(&slot.ubo, 0, bytemuck::bytes_of(&self.field_params(&f)));
                 pass.set_bind_group(0, &slot.bg[self.front], &[]);
-                pass.dispatch_workgroups(self.dims[0].div_ceil(8), self.dims[1].div_ceil(8), 1);
+                pass.dispatch_workgroups(self.dims[0].div_ceil(WORKGROUP), self.dims[1].div_ceil(WORKGROUP), 1);
             }
             let copies = self.symmetric_copies(frame);
             for (b, slot) in copies.iter().zip(&self.slots[1..]) {
                 let Some((p, region)) = self.brush_params(b) else { continue };
                 gpu.queue.write_buffer(&slot.ubo, 0, bytemuck::bytes_of(&p));
                 pass.set_bind_group(0, &slot.bg[self.front], &[]);
-                pass.dispatch_workgroups(region[0].div_ceil(8), region[1].div_ceil(8), 1);
+                pass.dispatch_workgroups(region[0].div_ceil(WORKGROUP), region[1].div_ceil(WORKGROUP), 1);
             }
         }
 
-        let view = View {
-            size: self.dims,
-            scale: self.scale,
-            smoothing: self.smoothing as u32,
-            offset: frame.offset,
-            blend: self.blend,
-            _pad: [0.0; 2],
-        };
+        let view = View { size: self.dims, scale: self.scale, offset: frame.offset, blend: self.blend, _pad: [0.0; 3] };
         gpu.queue.write_buffer(&self.view_ubo, 0, bytemuck::bytes_of(&view));
         gpu.queue.write_texture(
             self.palette.as_image_copy(),
             &frame.palette,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(1024), rows_per_image: None },
-            wgpu::Extent3d { width: 256, height: 1, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_SIZE * 4), rows_per_image: None },
+            wgpu::Extent3d { width: PALETTE_SIZE, height: 1, depth_or_array_layers: 1 },
         );
 
         let out = match self.surface.get_current_texture() {
@@ -375,7 +354,10 @@ impl Target {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &out_view,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -395,9 +377,7 @@ impl Target {
             size: self.dims,
             origin: [0, 0],
             mode: f.mode,
-            wipe: 0,
-            progress: f.progress,
-            seed: f.seed,
+            _pad: [0; 3],
             a: f.a,
             b: f.b,
             c: f.c,
@@ -437,9 +417,9 @@ impl Target {
         let [w, h] = self.dims;
         let pos = b.pos;
         let extent = match b.shape {
-            2 | 4 | 9 => b.radius * std::f32::consts::SQRT_2 + b.width,
+            SQUARE | TILE | CROSS => b.radius * std::f32::consts::SQRT_2 + b.width,
             // A glyph cell around the head is at most 2 radii away.
-            10 => b.radius * 2.5,
+            GLYPH => b.radius * 2.5,
             _ => b.radius + b.width,
         };
         let half = h as f32 * 0.5;
@@ -457,9 +437,7 @@ impl Target {
             size: self.dims,
             origin: [x0, y0],
             mode: BRUSH_MODE,
-            wipe: 0,
-            progress: 1.0,
-            seed: 0.0,
+            _pad: [0; 3],
             a: [0.0; 4],
             b: [0.0; 4],
             c: [b.lobes, 0.0, 0.0, 0.0],
@@ -468,6 +446,28 @@ impl Target {
         };
         Some((p, [x1 - x0, y1 - y0]))
     }
+}
+
+/// Bind groups writing into pattern buffer 0 and 1 with this uniform buffer.
+fn compute_bind_groups(
+    gpu: &Gpu,
+    ubo: &wgpu::Buffer,
+    phase: &[wgpu::Buffer],
+    picture: &wgpu::TextureView,
+    picture_sampler: &wgpu::Sampler,
+) -> [wgpu::BindGroup; 2] {
+    [0, 1].map(|k| {
+        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &gpu.field_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ubo.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: phase[k].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(picture) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(picture_sampler) },
+            ],
+        })
+    })
 }
 
 /// A single-channel picture texture the compute shader can sample.

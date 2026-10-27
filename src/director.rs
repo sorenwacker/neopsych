@@ -3,24 +3,41 @@
 //! preset. Everything here is resolution independent; the renderer maps it
 //! to pixels.
 
-use crate::palette::{self, Palette};
+use crate::palette::{self, ease, Palette};
 use crate::presets::{self, MotionStyle, Recipe};
 use crate::rng::Rng;
 use std::f32::consts::TAU;
 
 pub const MAX_OBJECTS: usize = 12;
+/// Every object can be drawn up to this many times by symmetry.
+pub const MAX_COPIES: usize = 12;
+/// Stamps drawn per frame, all copies included. The GPU has one slot each.
+pub const MAX_STAMPS: usize = MAX_OBJECTS * MAX_COPIES;
 /// Seconds between glyph rain showers, and how long one lasts.
 const RAIN_EVERY: (f32, f32) = (420.0, 780.0);
 const RAIN_LASTS: (f32, f32) = (20.0, 40.0);
 /// Where a finished rain drop is parked until it is removed.
 const GONE: f32 = 100.0;
-/// Every object can be drawn up to this many times by symmetry.
-pub const MAX_COPIES: usize = 12;
+/// Seconds between small surprises within a preset.
+const EVENT_EVERY: (f32, f32) = (4.0, 12.0);
+/// The symmetries a preset can get, with how often (out of 40) it gets each.
+/// The M hotkey steps through them in this order.
+const SYMMETRIES: [(Symmetry, u32); 9] = [
+    (Symmetry { turns: 1, mirror: false }, 6), // none
+    (Symmetry { turns: 1, mirror: true }, 6),  // left/right
+    (Symmetry { turns: 2, mirror: false }, 3), // half turn
+    (Symmetry { turns: 2, mirror: true }, 7),  // left/right and top/bottom
+    (Symmetry { turns: 3, mirror: false }, 2),
+    (Symmetry { turns: 3, mirror: true }, 4),
+    (Symmetry { turns: 4, mirror: true }, 5),
+    (Symmetry { turns: 5, mirror: true }, 4),
+    (Symmetry { turns: 6, mirror: true }, 3),
+];
 
 /// Synchronised copies of every object around the screen centre: `turns`
 /// rotated copies, each also mirrored when `mirror` is set. With mirroring
 /// that is `turns` mirror axes, the first one vertical (left/right).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Symmetry {
     pub turns: u32,
     pub mirror: bool,
@@ -39,7 +56,6 @@ pub struct FieldJob {
     /// New for every background, so the renderer knows when to draw one.
     pub id: u32,
     pub progress: f32,
-    pub seed: f32,
     pub a: [f32; 4],
     pub b: [f32; 4],
     pub c: [f32; 4],
@@ -111,11 +127,11 @@ impl Object {
         let s = self.age;
         match &mut self.motion {
             Motion::Bounce { vel } => {
-                for k in 0..2 {
-                    self.pos[k] += vel[k] * dt;
-                    if self.pos[k].abs() > 1.0 {
-                        self.pos[k] = self.pos[k].clamp(-1.0, 1.0);
-                        vel[k] = -vel[k];
+                for (p, v) in self.pos.iter_mut().zip(vel) {
+                    *p += *v * dt;
+                    if p.abs() > 1.0 {
+                        *p = p.clamp(-1.0, 1.0);
+                        *v = -*v;
                     }
                 }
             }
@@ -164,7 +180,8 @@ pub struct Director {
     /// background can wait for a fade, and the wait must not change what
     /// else the preset draws.
     field_rng: Rng,
-    speed_mult: f32,
+    /// Hotkey multipliers for colour cycling and object movement.
+    cycle_mult: f32,
     motion_mult: f32,
     preset_seconds: f32,
     /// Stay on this preset instead of rotating.
@@ -175,7 +192,6 @@ pub struct Director {
     /// Shape shared by all objects when the recipe is matched.
     theme: u32,
     symmetry: Symmetry,
-    preset_start: f64,
     preset_end: f64,
     next_event: f64,
     /// When the next background transition within the preset starts.
@@ -196,9 +212,11 @@ pub struct Director {
     pal_to: Palette,
     pal_start: f64,
     pal_dur: f32,
+    /// Palette rotation, and how fast it turns (cycles per second) on its
+    /// way to the preset's target speed.
     offset: f64,
-    speed: f32,
-    speed_target: f32,
+    cycle: f32,
+    cycle_target: f32,
     image_chance: f32,
     /// Set by the app each frame: a decoded picture is waiting.
     pub image_ready: bool,
@@ -208,7 +226,7 @@ pub struct Director {
 impl Director {
     pub fn new(
         seed: u64,
-        speed_mult: f32,
+        cycle_mult: f32,
         motion_mult: f32,
         preset_seconds: f32,
         transition_seconds: f32,
@@ -216,16 +234,17 @@ impl Director {
         image_chance: f32,
     ) -> Self {
         let mut order = Rng::new(seed);
-        let preset = fixed.unwrap_or_else(|| order.below(presets::COUNT as u32) as usize);
+        let preset = pick_preset(&mut order, fixed);
         let (recipe, name, pseed) = presets::get(preset);
         let mut rng = Rng::new(pseed);
         let pal = palette::random_of(&mut rng, recipe.palettes);
+        // Placeholders; start_preset sets the real ones.
         let field = random_field(&mut rng, recipe.fields);
         let mut d = Director {
             order,
             rng,
             field_rng: Rng::new(pseed),
-            speed_mult,
+            cycle_mult,
             motion_mult,
             preset_seconds,
             fixed,
@@ -233,8 +252,7 @@ impl Director {
             recipe,
             name,
             theme: 0,
-            symmetry: Symmetry { turns: 1, mirror: false },
-            preset_start: 0.0,
+            symmetry: SYMMETRIES[0].0,
             preset_end: 0.0,
             next_event: 0.0,
             next_field: 0.0,
@@ -252,8 +270,8 @@ impl Director {
             pal_start: 0.0,
             pal_dur: 1.0,
             offset: 0.0,
-            speed: 0.0,
-            speed_target: 0.1,
+            cycle: 0.0,
+            cycle_target: 0.1,
             image_chance,
             image_ready: false,
             new_image: false,
@@ -269,7 +287,7 @@ impl Director {
 
     /// Colour cycling and movement speed multipliers, as adjusted by hotkeys.
     pub fn speeds(&self) -> (f32, f32) {
-        (self.speed_mult, self.motion_mult)
+        (self.cycle_mult, self.motion_mult)
     }
 
     /// Steps `delta` presets forward or back from the current one.
@@ -284,7 +302,7 @@ impl Director {
 
     pub fn update(&mut self, t: f64, dt: f32) -> Frame {
         if t >= self.preset_end {
-            let next = self.fixed.unwrap_or_else(|| self.order.below(presets::COUNT as u32) as usize);
+            let next = pick_preset(&mut self.order, self.fixed);
             self.start_preset(next, t);
         }
         if t >= self.next_event {
@@ -292,13 +310,9 @@ impl Director {
         }
         // Glyph rain on its own clock, independent of presets.
         if t >= self.rain_switch {
-            if self.raining() {
-                self.stop_rain();
-                self.rain_switch = t + self.order.range(RAIN_EVERY.0, RAIN_EVERY.1) as f64;
-            } else {
-                self.start_rain();
-                self.rain_switch = t + self.order.range(RAIN_LASTS.0, RAIN_LASTS.1) as f64;
-            }
+            let (gap, raining) = if self.raining() { (RAIN_EVERY, false) } else { (RAIN_LASTS, true) };
+            self.set_rain(raining);
+            self.rain_switch = t + self.order.range(gap.0, gap.1) as f64;
         }
         // A fresh background now and then within the preset, sometimes a picture.
         if t >= self.next_field && !self.field_active {
@@ -308,9 +322,8 @@ impl Director {
         // The palette is always on its way to the next one.
         if t >= self.pal_start + self.pal_dur as f64 {
             self.pal_from = self.pal_to;
-            self.pal_to = palette::random_of(&mut self.rng, self.recipe.palettes);
-            self.pal_start = t;
-            self.pal_dur = self.rng.range(8.0, 16.0);
+            let dur = self.rng.range(8.0, 16.0);
+            self.blend_palette_to_new(t, dur);
         }
 
         let field = if self.field_active {
@@ -318,7 +331,7 @@ impl Director {
             if p >= 1.0 {
                 self.field_active = false;
             }
-            Some(FieldJob { progress: p * p * (3.0 - 2.0 * p), ..self.field })
+            Some(FieldJob { progress: ease(p), ..self.field })
         } else {
             None
         };
@@ -329,8 +342,8 @@ impl Director {
             }
         }
 
-        self.speed += (self.speed_target - self.speed) * (dt * 0.7).min(1.0);
-        self.offset = (self.offset + (self.speed * self.speed_mult * dt) as f64).rem_euclid(1.0);
+        self.cycle += (self.cycle_target - self.cycle) * (dt * 0.7).min(1.0);
+        self.offset = (self.offset + (self.cycle * self.cycle_mult * dt) as f64).rem_euclid(1.0);
 
         let move_dt = dt * self.motion_mult;
         let brushes = self.objects.iter_mut().chain(&mut self.drops).map(|o| o.step(move_dt)).collect();
@@ -349,7 +362,19 @@ impl Director {
 
     fn current_palette(&self, t: f64) -> Palette {
         let k = (((t - self.pal_start) as f32) / self.pal_dur).clamp(0.0, 1.0);
-        palette::lerp(&self.pal_from, &self.pal_to, k * k * (3.0 - 2.0 * k))
+        palette::lerp(&self.pal_from, &self.pal_to, ease(k))
+    }
+
+    /// Starts a `dur` second blend from pal_from into a new random palette.
+    fn blend_palette_to_new(&mut self, t: f64, dur: f32) {
+        self.pal_to = palette::random_of(&mut self.rng, self.recipe.palettes);
+        self.pal_start = t;
+        self.pal_dur = dur;
+    }
+
+    /// How many objects and rain drops fit on the GPU with the current symmetry.
+    fn stamp_room(&self) -> usize {
+        MAX_STAMPS / self.symmetry.copies()
     }
 
     fn start_preset(&mut self, index: usize, t: f64) {
@@ -359,28 +384,16 @@ impl Director {
         self.name = name;
         self.rng = Rng::new(seed);
         self.field_rng = Rng::new(seed ^ 0xF1E1D);
-        self.preset_start = t;
         self.preset_end = t + self.preset_seconds as f64;
-        self.next_event = t + self.rng.range(4.0, 12.0) as f64;
+        self.next_event = t + self.rng.range(EVENT_EVERY.0, EVENT_EVERY.1) as f64;
 
         let picture = self.roll_picture();
         self.begin_background(t, picture);
 
         let r = &mut self.rng;
-        self.theme = recipe.shapes[r.below(recipe.shapes.len() as u32) as usize];
+        self.theme = r.pick(recipe.shapes);
         let mut count = r.range(recipe.count.0 as f32, recipe.count.1 as f32 + 0.999) as usize;
-        let (turns, mirror) = match r.below(40) {
-            0..=5 => (1, false),   // none
-            6..=11 => (1, true),   // left/right
-            12..=14 => (2, false), // half turn
-            15..=21 => (2, true),  // left/right and top/bottom
-            22..=23 => (3, false),
-            24..=27 => (3, true),
-            28..=32 => (4, true),
-            33..=36 => (5, true),
-            _ => (6, true),
-        };
-        self.symmetry = Symmetry { turns, mirror };
+        self.symmetry = random_symmetry(r);
         // Keep roughly the same amount on screen however many copies there are.
         let copies = self.symmetry.copies();
         if copies > 2 {
@@ -391,16 +404,15 @@ impl Director {
             count = count.min(2);
         }
         let theme = self.theme;
-        // Every stamp needs a slot on the GPU; see gpu::Target.
-        let limit = MAX_OBJECTS * MAX_COPIES / copies;
-        self.objects = (0..count.min(limit)).map(|_| random_object(r, recipe, theme)).collect();
+        let count = count.min(self.stamp_room());
+        let r = &mut self.rng;
+        self.objects = (0..count).map(|_| random_object(r, recipe, theme)).collect();
 
         // Blend from whatever is showing into the preset's own palette.
         self.pal_from = self.current_palette(t);
-        self.pal_to = palette::random_of(&mut self.rng, recipe.palettes);
-        self.pal_start = t;
-        self.pal_dur = self.rng.range(3.0, 6.0);
-        self.speed_target = self.rng.sign() * self.rng.range(recipe.cycle.0, recipe.cycle.1);
+        let dur = self.rng.range(3.0, 6.0);
+        self.blend_palette_to_new(t, dur);
+        self.cycle_target = self.rng.sign() * self.rng.range(recipe.cycle.0, recipe.cycle.1);
     }
 
     /// Hotkey: fade in a new background.
@@ -441,51 +453,42 @@ impl Director {
     /// Hotkey: blend quickly into a new palette.
     pub fn next_palette(&mut self, t: f64) {
         self.pal_from = self.current_palette(t);
-        self.pal_to = palette::random_of(&mut self.rng, self.recipe.palettes);
-        self.pal_start = t;
-        self.pal_dur = 2.0;
+        self.blend_palette_to_new(t, 2.0);
     }
 
     /// Hotkey: step through the symmetry options.
     pub fn next_symmetry(&mut self) {
-        const ORDER: [(u32, bool); 9] =
-            [(1, false), (1, true), (2, false), (2, true), (3, false), (3, true), (4, true), (5, true), (6, true)];
-        let i = ORDER.iter().position(|&s| s == (self.symmetry.turns, self.symmetry.mirror)).unwrap_or(0);
-        let (turns, mirror) = ORDER[(i + 1) % ORDER.len()];
-        self.symmetry = Symmetry { turns, mirror };
+        let i = SYMMETRIES.iter().position(|s| s.0 == self.symmetry).unwrap_or(0);
+        self.symmetry = SYMMETRIES[(i + 1) % SYMMETRIES.len()].0;
     }
 
-    /// Hotkey (and events): start a shower of glyph rain, or let the current
-    /// one end.
+    /// Hotkey: start a shower of glyph rain, or let the current one end.
     pub fn toggle_rain(&mut self) {
-        if self.raining() {
-            self.stop_rain();
-        } else {
-            self.start_rain();
-        }
+        self.set_rain(!self.raining());
     }
 
     fn raining(&self) -> bool {
         self.drops.iter().any(|d| !d.retire)
     }
 
-    fn start_rain(&mut self) {
-        let room = (MAX_OBJECTS * MAX_COPIES / self.symmetry.copies()).saturating_sub(self.objects.len());
-        let cell = self.rng.range(0.02, 0.032);
-        let count = (self.rng.range(20.0, 45.0) as usize).min(room);
-        self.drops = (0..count).map(|_| random_drop(&mut self.rng, cell)).collect();
-    }
-
-    /// Drops already falling finish their fall; none start again.
-    fn stop_rain(&mut self) {
-        for d in &mut self.drops {
-            d.retire = true;
+    /// Starts a shower, or lets drops already falling finish their fall
+    /// without starting again.
+    fn set_rain(&mut self, on: bool) {
+        if on {
+            let room = self.stamp_room().saturating_sub(self.objects.len());
+            let cell = self.rng.range(0.02, 0.032);
+            let count = (self.rng.range(20.0, 45.0) as usize).min(room);
+            self.drops = (0..count).map(|_| random_drop(&mut self.rng, cell)).collect();
+        } else {
+            for d in &mut self.drops {
+                d.retire = true;
+            }
         }
     }
 
     /// Hotkey: run the colour cycling the other way.
     pub fn reverse(&mut self) {
-        self.speed_target = -self.speed_target;
+        self.cycle_target = -self.cycle_target;
     }
 
     /// Hotkey: multiply how fast objects move.
@@ -494,8 +497,8 @@ impl Director {
     }
 
     /// Hotkey: multiply the colour cycling speed.
-    pub fn scale_speed(&mut self, factor: f32) {
-        self.speed_mult = (self.speed_mult * factor).clamp(0.05, 20.0);
+    pub fn scale_cycle(&mut self, factor: f32) {
+        self.cycle_mult = (self.cycle_mult * factor).clamp(0.05, 20.0);
     }
 
     /// Starts revealing a new background pattern from the preset's list.
@@ -513,10 +516,10 @@ impl Director {
     /// or swap one object for a new one.
     fn event(&mut self, t: f64) {
         let r = &mut self.rng;
-        self.next_event = t + r.range(4.0, 12.0) as f64;
+        self.next_event = t + r.range(EVENT_EVERY.0, EVENT_EVERY.1) as f64;
         match r.below(3) {
-            0 => self.speed_target = -self.speed_target,
-            1 => self.speed_target = self.speed_target.signum() * r.range(self.recipe.cycle.0, self.recipe.cycle.1),
+            0 => self.cycle_target = -self.cycle_target,
+            1 => self.cycle_target = self.cycle_target.signum() * r.range(self.recipe.cycle.0, self.recipe.cycle.1),
             _ => {
                 if !self.objects.is_empty() {
                     let i = r.below(self.objects.len() as u32) as usize;
@@ -527,7 +530,23 @@ impl Director {
     }
 }
 
-/// One column of glyph rain. All drops in a preset share `cell` (half a
+/// The fixed preset, or a random one.
+fn pick_preset(order: &mut Rng, fixed: Option<usize>) -> usize {
+    fixed.unwrap_or_else(|| order.below(presets::COUNT as u32) as usize)
+}
+
+fn random_symmetry(r: &mut Rng) -> Symmetry {
+    let mut roll = r.below(SYMMETRIES.iter().map(|s| s.1).sum());
+    for (symmetry, weight) in SYMMETRIES {
+        if roll < weight {
+            return symmetry;
+        }
+        roll -= weight;
+    }
+    unreachable!()
+}
+
+/// One column of glyph rain. All drops in a shower share `cell` (half a
 /// glyph's height) so they fall on the same grid.
 fn random_drop(r: &mut Rng, cell: f32) -> Object {
     Object {
@@ -550,15 +569,15 @@ fn random_drop(r: &mut Rng, cell: f32) -> Object {
 }
 
 fn random_object(r: &mut Rng, recipe: &Recipe, theme: u32) -> Object {
-    let shape =
-        if recipe.matched || recipe.shapes.len() == 1 { theme } else { recipe.shapes[r.below(recipe.shapes.len() as u32) as usize] };
+    let shape = if recipe.matched || recipe.shapes.len() == 1 { theme } else { r.pick(recipe.shapes) };
     let orbit = match recipe.motion {
         MotionStyle::Bounce => false,
         MotionStyle::Orbit => true,
         MotionStyle::Mixed => r.chance(0.4),
     };
     let motion = if orbit {
-        // Orbit frequencies scale with the recipe's speed so calm presets stay calm.
+        // Orbit frequencies scale with the recipe's speed so calm presets stay
+        // calm; 0.75 is the default speed range's lo + hi, which gives k = 1.
         let k = (recipe.speed.0 + recipe.speed.1) / 0.75;
         Motion::Orbit {
             freq: [r.range(0.15, 0.8) * k, r.range(0.15, 0.8) * k, r.range(0.4, 2.0) * k, r.range(0.4, 2.0) * k],
@@ -589,7 +608,7 @@ fn random_object(r: &mut Rng, recipe: &Recipe, theme: u32) -> Object {
 }
 
 fn random_field(r: &mut Rng, modes: &[u32]) -> FieldJob {
-    let mode = modes[r.below(modes.len() as u32) as usize];
+    let mode = r.pick(modes);
     let (a, b, c) = match mode {
         presets::PLASMA => (
             [r.range(2.0, 9.0), r.range(0.0, TAU), r.range(2.0, 9.0), r.range(0.0, TAU)],
@@ -616,16 +635,15 @@ fn random_field(r: &mut Rng, modes: &[u32]) -> FieldJob {
             [r.range(1.0, 8.0), r.range(0.3, 1.2), 0.0, 0.0],
             [0.0; 4],
         ),
-        presets::GRID => (
-            [r.range(3.0, 12.0), r.range(0.3, 1.2), r.range(0.0, 3.0), r.range(0.0, TAU)],
-            [0.0; 4],
-            [0.0; 4],
-        ),
-        _ => (
+        presets::GRID => {
+            ([r.range(3.0, 12.0), r.range(0.3, 1.2), r.range(0.0, 3.0), r.range(0.0, TAU)], [0.0; 4], [0.0; 4])
+        }
+        presets::TUNNEL => (
             [r.range(1.0, 6.0), r.range(0.0, TAU), r.range(1.0, 6.0), r.range(0.0, TAU)],
             [r.range(1.0, 5.0), r.int(-4, 4), r.range(0.1, 0.5), 0.0],
             [0.0; 4],
         ),
+        other => unreachable!("background pattern {other} is not in a recipe"),
     };
-    FieldJob { mode, id: 0, progress: 0.0, seed: r.below(1 << 20) as f32, a, b, c }
+    FieldJob { mode, id: 0, progress: 0.0, a, b, c }
 }
