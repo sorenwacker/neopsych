@@ -152,7 +152,7 @@ impl App {
     }
 
     fn create_windows(&self, el: &ActiveEventLoop) -> Vec<Window> {
-        let base = Window::default_attributes().with_title("neopsych");
+        let base = with_icon(Window::default_attributes().with_title("neopsych"));
         match self.mode {
             Mode::Saver => el
                 .available_monitors()
@@ -401,6 +401,21 @@ fn preview_window(el: &ActiveEventLoop, base: winit::window::WindowAttributes, h
 #[cfg(not(windows))]
 fn preview_window(_: &ActiveEventLoop, _: winit::window::WindowAttributes, _: isize) -> Option<Window> {
     None
+}
+
+/// The icon built into the exe (see build.rs), for the title bar and taskbar.
+#[cfg(windows)]
+fn with_icon(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    use winit::platform::windows::{IconExtWindows, WindowAttributesExtWindows};
+    use winit::window::Icon;
+    let small = Icon::from_resource(1, Some(winit::dpi::PhysicalSize::new(32, 32))).ok();
+    let large = Icon::from_resource(1, Some(winit::dpi::PhysicalSize::new(256, 256))).ok();
+    attrs.with_window_icon(small).with_taskbar_icon(large)
+}
+
+#[cfg(not(windows))]
+fn with_icon(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    attrs
 }
 
 #[cfg(windows)]
