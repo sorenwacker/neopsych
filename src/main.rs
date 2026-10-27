@@ -51,6 +51,7 @@ Left / Right\tprevious / next preset
 PgUp / PgDn\tjump a family (5 presets)
 B\tnew background pattern
 I\tshow a wallpaper picture
+S\tpictures from subfolders too on / off
 C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
@@ -125,12 +126,7 @@ impl App {
             fixed,
             cfg.image_chance,
         );
-        let images = if cfg.image_chance > 0.0 {
-            let folder = cfg.image_folder.clone().unwrap_or_else(images::default_folder);
-            Some(Images::open(&folder, cfg.image_subfolders, seed))
-        } else {
-            None
-        };
+        let images = open_images(&cfg, seed);
         let now = Instant::now();
         App {
             mode,
@@ -176,6 +172,14 @@ impl App {
             w.set_cursor_visible(fs.is_none());
             w.set_fullscreen(fs);
         }
+    }
+
+    /// Hotkey: take pictures from the image folder's subfolders too, or stop.
+    /// Rescans in the background and remembers the choice for next time.
+    fn toggle_subfolders(&mut self) {
+        self.cfg.image_subfolders = !self.cfg.image_subfolders;
+        self.images = open_images(&self.cfg, self.clock.to_bits());
+        let _ = config::save_values(&[("image_subfolders", self.cfg.image_subfolders.to_string())]);
     }
 
     fn render_all(&mut self) {
@@ -316,6 +320,7 @@ impl ApplicationHandler for App {
                         "+" | "=" => d.scale_cycle(1.25),
                         "-" => d.scale_cycle(0.8),
                         "f" => self.toggle_fullscreen(id),
+                        "s" => self.toggle_subfolders(),
                         "h" => show_help(),
                         _ => {}
                     },
@@ -401,6 +406,14 @@ fn preview_window(el: &ActiveEventLoop, base: winit::window::WindowAttributes, h
 #[cfg(not(windows))]
 fn preview_window(_: &ActiveEventLoop, _: winit::window::WindowAttributes, _: isize) -> Option<Window> {
     None
+}
+
+/// Starts loading pictures in the background, unless they are turned off.
+fn open_images(cfg: &Config, seed: u64) -> Option<Images> {
+    (cfg.image_chance > 0.0).then(|| {
+        let folder = cfg.image_folder.clone().unwrap_or_else(images::default_folder);
+        Images::open(&folder, cfg.image_subfolders, seed)
+    })
 }
 
 /// The icon built into the exe (see build.rs), for the title bar and taskbar.
