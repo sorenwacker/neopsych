@@ -47,6 +47,17 @@ impl Symmetry {
     pub fn copies(&self) -> usize {
         self.turns as usize * if self.mirror { 2 } else { 1 }
     }
+
+    /// For on-screen messages, e.g. "4 mirrors".
+    pub fn describe(&self) -> String {
+        match (self.turns, self.mirror) {
+            (1, false) => "none".into(),
+            (1, true) => "left/right mirror".into(),
+            (2, false) => "half turn".into(),
+            (n, false) => format!("{n}-fold turn"),
+            (n, true) => format!("{n} mirrors"),
+        }
+    }
 }
 
 /// A full-screen pattern, blended in over the old one while progress goes 0 -> 1.
@@ -421,10 +432,12 @@ impl Director {
     }
 
     /// Hotkey: fade in a picture, if one is decoded.
-    pub fn show_picture(&mut self, t: f64) {
+    /// Returns false if no picture is ready yet.
+    pub fn show_picture(&mut self, t: f64) -> bool {
         if self.image_ready {
             self.begin_background(t, true);
         }
+        self.image_ready
     }
 
     /// Whether the next background should be a picture. Decided with the
@@ -457,9 +470,10 @@ impl Director {
     }
 
     /// Hotkey: step through the symmetry options.
-    pub fn next_symmetry(&mut self) {
+    pub fn next_symmetry(&mut self) -> Symmetry {
         let i = SYMMETRIES.iter().position(|s| s.0 == self.symmetry).unwrap_or(0);
         self.symmetry = SYMMETRIES[(i + 1) % SYMMETRIES.len()].0;
+        self.symmetry
     }
 
     /// Hotkey: start a shower of glyph rain, or let the current one end.
@@ -467,7 +481,7 @@ impl Director {
         self.set_rain(!self.raining());
     }
 
-    fn raining(&self) -> bool {
+    pub fn raining(&self) -> bool {
         self.drops.iter().any(|d| !d.retire)
     }
 

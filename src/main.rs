@@ -4,6 +4,7 @@ mod config;
 mod director;
 mod gpu;
 mod images;
+mod osd;
 mod palette;
 mod presets;
 mod rng;
@@ -108,7 +109,12 @@ struct App {
     /// Preset name last shown in the window title.
     title: String,
     images: Option<Images>,
+    /// On-screen message and when it appeared; interactive mode only.
+    message: Option<(String, Instant)>,
 }
+
+/// Seconds a message stays fully visible, then fades out over the next half.
+const MESSAGE_SECONDS: f32 = 2.0;
 
 impl App {
     fn new(mode: Mode, cfg: Config) -> App {
@@ -144,7 +150,26 @@ impl App {
             vsync_paced: false,
             title: String::new(),
             images,
+            message: None,
         }
+    }
+
+    /// Shows `text` briefly on screen.
+    fn say(&mut self, text: impl Into<String>) {
+        if self.mode.interactive() {
+            self.message = Some((text.into(), Instant::now()));
+        }
+    }
+
+    /// The current message and how visible it is, if one is showing.
+    fn current_message(&mut self, now: Instant) -> Option<(&str, f32)> {
+        let age = (now - self.message.as_ref()?.1).as_secs_f32();
+        if age > MESSAGE_SECONDS + 0.5 {
+            self.message = None;
+            return None;
+        }
+        let alpha = (1.0 - (age - MESSAGE_SECONDS) / 0.5).min(1.0);
+        self.message.as_ref().map(|m| (m.0.as_str(), alpha))
     }
 
     fn create_windows(&self, el: &ActiveEventLoop) -> Vec<Window> {
@@ -180,11 +205,24 @@ impl App {
         self.cfg.image_subfolders = !self.cfg.image_subfolders;
         self.images = open_images(&self.cfg, self.clock.to_bits());
         let _ = config::save_values(&[("image_subfolders", self.cfg.image_subfolders.to_string())]);
+        self.say(if self.cfg.image_subfolders { "Pictures: with subfolders" } else { "Pictures: top folder only" });
     }
 
     fn render_all(&mut self) {
-        let Some(gpu) = &self.gpu else { return };
+        if self.gpu.is_none() {
+            return;
+        }
         let now = Instant::now();
+        // A new preset, by time or by hotkey: name it in the title and on screen.
+        if self.mode.interactive() && self.title != self.director.name() {
+            self.title = self.director.name().to_string();
+            for t in &self.targets {
+                t.window.set_title(&format!("neopsych - {}   |   {HOTKEYS}", self.title));
+            }
+            self.say(self.title.clone());
+        }
+        let message = self.current_message(now).map(|(text, alpha)| (text.to_string(), alpha));
+        let Some(gpu) = &self.gpu else { return };
         let dt = if self.paused { 0.0 } else { (now - self.last).as_secs_f32().min(0.25) };
         self.last = now;
         self.clock += dt as f64;
@@ -198,13 +236,7 @@ impl App {
             }
         }
         for t in &mut self.targets {
-            t.render(gpu, &frame);
-        }
-        if self.mode.interactive() && self.title != self.director.name() {
-            self.title = self.director.name().to_string();
-            for t in &self.targets {
-                t.window.set_title(&format!("neopsych - {}   |   {HOTKEYS}", self.title));
-            }
+            t.render(gpu, &frame, message.as_ref().map(|(text, alpha)| (text.as_str(), *alpha)));
         }
         if let Some((path, frames, since)) = &mut self.stats {
             *frames += 1;
@@ -300,31 +332,89 @@ impl ApplicationHandler for App {
                 }
                 let t = self.clock;
                 let d = &mut self.director;
-                match &event.logical_key {
-                    Key::Named(NamedKey::Escape) => el.exit(),
-                    Key::Named(NamedKey::ArrowRight) => d.skip(1, t),
-                    Key::Named(NamedKey::ArrowLeft) => d.skip(-1, t),
-                    Key::Named(NamedKey::PageDown) => d.skip(presets::VARIATIONS as i32, t),
-                    Key::Named(NamedKey::PageUp) => d.skip(-(presets::VARIATIONS as i32), t),
-                    Key::Named(NamedKey::ArrowUp) => d.scale_motion(1.25),
-                    Key::Named(NamedKey::ArrowDown) => d.scale_motion(0.8),
-                    Key::Named(NamedKey::Space) => self.paused = !self.paused,
-                    Key::Named(NamedKey::F11) => self.toggle_fullscreen(id),
+                // Preset changes announce themselves (see render_all).
+                let said: Option<String> = match &event.logical_key {
+                    Key::Named(NamedKey::Escape) => {
+                        el.exit();
+                        None
+                    }
+                    Key::Named(NamedKey::ArrowRight) => {
+                        d.skip(1, t);
+                        None
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        d.skip(-1, t);
+                        None
+                    }
+                    Key::Named(NamedKey::PageDown) => {
+                        d.skip(presets::VARIATIONS as i32, t);
+                        None
+                    }
+                    Key::Named(NamedKey::PageUp) => {
+                        d.skip(-(presets::VARIATIONS as i32), t);
+                        None
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        d.scale_motion(1.25);
+                        Some(format!("Movement speed: {:.2}", d.speeds().1))
+                    }
+                    Key::Named(NamedKey::ArrowDown) => {
+                        d.scale_motion(0.8);
+                        Some(format!("Movement speed: {:.2}", d.speeds().1))
+                    }
+                    Key::Named(NamedKey::Space) => {
+                        self.paused = !self.paused;
+                        Some(if self.paused { "Paused" } else { "Playing" }.into())
+                    }
+                    Key::Named(NamedKey::F11) => {
+                        self.toggle_fullscreen(id);
+                        None
+                    }
                     Key::Character(c) => match c.to_ascii_lowercase().as_str() {
-                        "b" => d.next_background(t),
-                        "i" => d.show_picture(t),
-                        "c" => d.next_palette(t),
-                        "m" => d.next_symmetry(),
-                        "g" => d.toggle_rain(),
-                        "r" => d.reverse(),
-                        "+" | "=" => d.scale_cycle(1.25),
-                        "-" => d.scale_cycle(0.8),
-                        "f" => self.toggle_fullscreen(id),
-                        "s" => self.toggle_subfolders(),
-                        "h" => show_help(),
-                        _ => {}
+                        "b" => {
+                            d.next_background(t);
+                            Some("New background".into())
+                        }
+                        "i" => Some(if d.show_picture(t) { "Picture" } else { "No picture ready yet" }.into()),
+                        "c" => {
+                            d.next_palette(t);
+                            Some("New colours".into())
+                        }
+                        "m" => Some(format!("Symmetry: {}", d.next_symmetry().describe())),
+                        "g" => {
+                            d.toggle_rain();
+                            Some(if d.raining() { "Glyph rain: on" } else { "Glyph rain: off" }.into())
+                        }
+                        "r" => {
+                            d.reverse();
+                            Some("Colours reversed".into())
+                        }
+                        "+" | "=" => {
+                            d.scale_cycle(1.25);
+                            Some(format!("Colour speed: {:.2}", d.speeds().0))
+                        }
+                        "-" => {
+                            d.scale_cycle(0.8);
+                            Some(format!("Colour speed: {:.2}", d.speeds().0))
+                        }
+                        "f" => {
+                            self.toggle_fullscreen(id);
+                            None
+                        }
+                        "s" => {
+                            self.toggle_subfolders();
+                            None
+                        }
+                        "h" => {
+                            show_help();
+                            None
+                        }
+                        _ => None,
                     },
-                    _ => {}
+                    _ => None,
+                };
+                if let Some(text) = said {
+                    self.say(text);
                 }
             }
             WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } if saver => el.exit(),
@@ -337,11 +427,18 @@ impl ApplicationHandler for App {
                 };
                 if up != 0.0 {
                     let factor = if up > 0.0 { 1.15 } else { 1.0 / 1.15 };
-                    if self.shift {
+                    let (cycle, motion) = if self.shift {
                         self.director.scale_cycle(factor);
+                        self.director.speeds()
                     } else {
                         self.director.scale_motion(factor);
-                    }
+                        self.director.speeds()
+                    };
+                    self.say(if self.shift {
+                        format!("Colour speed: {cycle:.2}")
+                    } else {
+                        format!("Movement speed: {motion:.2}")
+                    });
                 }
             }
             WindowEvent::CursorMoved { position, .. } if saver => {

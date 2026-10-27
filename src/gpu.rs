@@ -1,5 +1,6 @@
 use crate::director::{Brush, FieldJob, Frame, MAX_STAMPS};
 use crate::images::Gray;
+use crate::osd;
 use crate::presets::{CROSS, GLYPH, SQUARE, TILE};
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
@@ -36,7 +37,9 @@ struct View {
     scale: u32,
     offset: f32,
     blend: f32,
-    _pad: [f32; 3],
+    osd_alpha: f32,
+    _pad: [f32; 2],
+    osd_rect: [f32; 4],
 }
 
 /// Device plus the pipelines every window shares.
@@ -141,6 +144,10 @@ pub struct Target {
     /// One per choice of front buffer; set by alloc, which always runs in new.
     display_bg: Vec<wgpu::BindGroup>,
     needs_full: bool,
+    /// The on-screen message bitmap, the text in it and its width in texels.
+    osd: wgpu::Texture,
+    osd_text: String,
+    osd_width: u32,
 }
 
 impl Target {
@@ -202,6 +209,18 @@ impl Target {
             }),
             display_bg: Vec::new(),
             needs_full: true,
+            osd: gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("osd"),
+                size: wgpu::Extent3d { width: osd::WIDTH, height: osd::HEIGHT, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            }),
+            osd_text: String::new(),
+            osd_width: 0,
         };
         t.alloc(gpu, scale);
         t
@@ -246,6 +265,7 @@ impl Target {
             .collect();
 
         let palette_view = self.palette.create_view(&Default::default());
+        let osd_view = self.osd.create_view(&Default::default());
         self.display_bg = (0..2)
             .map(|front| {
                 gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -260,6 +280,7 @@ impl Target {
                         },
                         wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                         wgpu::BindGroupEntry { binding: 4, resource: self.phase[1 - front].as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&osd_view) },
                     ],
                 })
             })
@@ -288,7 +309,8 @@ impl Target {
         self.alloc(gpu, scale);
     }
 
-    pub fn render(&mut self, gpu: &Gpu, frame: &Frame) {
+    /// Draws a frame, with `message` (text, visibility 0..1) on top if given.
+    pub fn render(&mut self, gpu: &Gpu, frame: &Frame, message: Option<(&str, f32)>) {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
 
         // A new background is drawn once, into the back buffer, which then
@@ -328,7 +350,30 @@ impl Target {
             }
         }
 
-        let view = View { size: self.dims, scale: self.scale, offset: frame.offset, blend: self.blend, _pad: [0.0; 3] };
+        if let Some((text, _)) = message {
+            if text != self.osd_text {
+                let (bitmap, width) = osd::render(text);
+                gpu.queue.write_texture(
+                    self.osd.as_image_copy(),
+                    &bitmap,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(osd::WIDTH), rows_per_image: None },
+                    wgpu::Extent3d { width: osd::WIDTH, height: osd::HEIGHT, depth_or_array_layers: 1 },
+                );
+                self.osd_text = text.to_string();
+                self.osd_width = width;
+            }
+        }
+        // Text about a 30th of the screen tall, a little in from the corner.
+        let texel = (self.config.height as f32 / 270.0).floor().max(2.0);
+        let view = View {
+            size: self.dims,
+            scale: self.scale,
+            offset: frame.offset,
+            blend: self.blend,
+            osd_alpha: message.map_or(0.0, |m| m.1),
+            _pad: [0.0; 2],
+            osd_rect: [texel * 8.0, texel * 8.0, texel, self.osd_width as f32],
+        };
         gpu.queue.write_buffer(&self.view_ubo, 0, bytemuck::bytes_of(&view));
         gpu.queue.write_texture(
             self.palette.as_image_copy(),
