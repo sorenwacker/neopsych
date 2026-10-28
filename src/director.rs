@@ -48,6 +48,23 @@ impl Symmetry {
         self.turns as usize * if self.mirror { 2 } else { 1 }
     }
 
+    /// As written in the settings file: "1" for none, "2" for a half turn,
+    /// "4m" for four mirrors, and so on.
+    pub fn to_setting(self) -> String {
+        format!("{}{}", self.turns, if self.mirror { "m" } else { "" })
+    }
+
+    /// Reads to_setting's format; None for "random" or anything unknown.
+    pub fn from_setting(s: &str) -> Option<Symmetry> {
+        let s = s.trim();
+        let (turns, mirror) = match s.strip_suffix('m') {
+            Some(t) => (t, true),
+            None => (s, false),
+        };
+        let wanted = Symmetry { turns: turns.parse().ok()?, mirror };
+        SYMMETRIES.iter().any(|x| x.0 == wanted).then_some(wanted)
+    }
+
     /// For on-screen messages, e.g. "4 mirrors".
     pub fn describe(&self) -> String {
         match (self.turns, self.mirror) {
@@ -236,6 +253,11 @@ pub struct Director {
     pub show_objects: bool,
     /// Set by the app: keep the background, only changing it by hotkey.
     pub hold_background: bool,
+    /// Glyph rain showers come now and then; when false, none start.
+    pub rain_on: bool,
+    /// A symmetry chosen with the hotkey, kept across presets; None lets
+    /// every preset pick its own.
+    symmetry_choice: Option<Symmetry>,
     new_image: bool,
 }
 
@@ -292,6 +314,8 @@ impl Director {
             image_ready: false,
             show_objects: true,
             hold_background: false,
+            rain_on: true,
+            symmetry_choice: None,
             new_image: false,
         };
         d.start_preset(preset, 0.0);
@@ -337,8 +361,11 @@ impl Director {
         }
         // Glyph rain on its own clock, independent of presets.
         if t >= self.rain_switch {
-            let (gap, raining) = if self.raining() { (RAIN_EVERY, false) } else { (RAIN_LASTS, true) };
-            self.set_rain(raining);
+            let start = !self.raining() && self.rain_on;
+            if start || self.raining() {
+                self.set_rain(start);
+            }
+            let gap = if start { RAIN_LASTS } else { RAIN_EVERY };
             self.rain_switch = t + self.order.range(gap.0, gap.1) as f64;
         }
         // A fresh background now and then within the preset, sometimes a picture.
@@ -424,7 +451,9 @@ impl Director {
         let r = &mut self.rng;
         self.theme = r.pick(recipe.shapes);
         let mut count = r.range(recipe.count.0 as f32, recipe.count.1 as f32 + 0.999) as usize;
-        self.symmetry = random_symmetry(r);
+        // Picked even when one is chosen, so the preset's sequence stays the same.
+        let picked = random_symmetry(r);
+        self.symmetry = self.symmetry_choice.unwrap_or(picked);
         // Keep roughly the same amount on screen however many copies there are.
         let copies = self.symmetry.copies();
         if copies > 2 {
@@ -495,15 +524,33 @@ impl Director {
     }
 
     /// Hotkey: step through the symmetry options.
-    pub fn next_symmetry(&mut self) -> Symmetry {
-        let i = SYMMETRIES.iter().position(|s| s.0 == self.symmetry).unwrap_or(0);
-        self.symmetry = SYMMETRIES[(i + 1) % SYMMETRIES.len()].0;
-        self.symmetry
+    /// Steps to the next symmetry choice: random (each preset picks), then
+    /// each symmetry in turn, then random again.
+    pub fn next_symmetry(&mut self) -> Option<Symmetry> {
+        let next = match self.symmetry_choice {
+            None => Some(SYMMETRIES[0].0),
+            Some(s) => {
+                let i = SYMMETRIES.iter().position(|x| x.0 == s).unwrap_or(0);
+                SYMMETRIES.get(i + 1).map(|x| x.0)
+            }
+        };
+        self.choose_symmetry(next);
+        next
     }
 
-    /// Hotkey: start a shower of glyph rain, or let the current one end.
-    pub fn toggle_rain(&mut self) {
-        self.set_rain(!self.raining());
+    /// Keeps `choice` across presets, starting now; None lets presets pick.
+    pub fn choose_symmetry(&mut self, choice: Option<Symmetry>) {
+        self.symmetry_choice = choice;
+        if let Some(s) = choice {
+            self.symmetry = s;
+        }
+    }
+
+    /// Hotkey: glyph rain on (a shower starts now, more follow) or off
+    /// (the current shower ends and no more start).
+    pub fn set_rain_on(&mut self, on: bool) {
+        self.rain_on = on;
+        self.set_rain(on);
     }
 
     pub fn raining(&self) -> bool {

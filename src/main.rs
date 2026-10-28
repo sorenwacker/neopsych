@@ -36,6 +36,9 @@ enum Mode {
     Configure,
     /// --window or --fullscreen: interactive, with hotkeys.
     Windowed { fullscreen: bool },
+    /// --play: like Windowed, fullscreen or not as last left. Becomes
+    /// Windowed once the settings are loaded.
+    Play,
 }
 
 impl Mode {
@@ -63,7 +66,7 @@ S\tpictures from subfolders too on / off
 
 SHAPES
 O\tmoving shapes on / off
-M\tnext symmetry
+M\tnext symmetry, or random per preset
 G\tglyph rain on / off
 Up / Down, wheel\tmovement faster / slower
 
@@ -99,6 +102,7 @@ fn parse_args() -> Mode {
         }
         "c" => Mode::Configure,
         "fullscreen" | "f" => Mode::Windowed { fullscreen: true },
+        "play" => Mode::Play,
         _ => Mode::Windowed { fullscreen: false },
     }
 }
@@ -144,7 +148,7 @@ impl App {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1);
         let fixed = (cfg.preset > 0).then(|| cfg.preset as usize - 1);
-        let director = Director::new(
+        let mut director = Director::new(
             seed,
             cfg.speed,
             cfg.motion,
@@ -153,6 +157,8 @@ impl App {
             fixed,
             cfg.image_chance,
         );
+        director.rain_on = cfg.rain;
+        director.choose_symmetry(director::Symmetry::from_setting(&cfg.symmetry));
         let images = open_images(&cfg, seed);
         let now = Instant::now();
         App {
@@ -222,13 +228,44 @@ impl App {
         }
     }
 
-    fn toggle_fullscreen(&self, id: WindowId) {
+    /// Fullscreen on or off, remembered for --play.
+    fn toggle_fullscreen(&mut self, id: WindowId) {
         if let Some(t) = self.targets.iter().find(|t| t.id() == id) {
             let w = &t.window;
             let fs = if w.fullscreen().is_some() { None } else { Some(Fullscreen::Borderless(w.current_monitor())) };
             w.set_cursor_visible(fs.is_none());
+            self.cfg.fullscreen = fs.is_some();
             w.set_fullscreen(fs);
+            let _ = config::save_values(&[("fullscreen", self.cfg.fullscreen.to_string())]);
         }
+    }
+
+    /// Saves the colour and movement speeds if a hotkey or the wheel changed them.
+    fn save_speeds(&mut self) {
+        let (speed, motion) = self.director.speeds();
+        if (speed - self.cfg.speed).abs() > 1e-4 || (motion - self.cfg.motion).abs() > 1e-4 {
+            (self.cfg.speed, self.cfg.motion) = (speed, motion);
+            let _ = config::save_values(&[("speed", format!("{speed:.3}")), ("motion", format!("{motion:.3}"))]);
+        }
+    }
+
+    /// Hotkey: glyph rain showers on or off. Remembered for next time.
+    fn toggle_rain(&mut self) {
+        self.cfg.rain = !self.cfg.rain;
+        self.director.set_rain_on(self.cfg.rain);
+        let _ = config::save_values(&[("rain", self.cfg.rain.to_string())]);
+        self.say(if self.cfg.rain { "Glyph rain: on" } else { "Glyph rain: off" });
+    }
+
+    /// Hotkey: next symmetry, or random to let presets pick. Remembered for next time.
+    fn next_symmetry(&mut self) {
+        let choice = self.director.next_symmetry();
+        self.cfg.symmetry = choice.map_or("random".into(), |s| s.to_setting());
+        let _ = config::save_values(&[("symmetry", self.cfg.symmetry.clone())]);
+        self.say(match choice {
+            Some(s) => format!("Symmetry: {}", s.describe()),
+            None => "Symmetry: random, from the next preset".into(),
+        });
     }
 
     /// Hotkey: take pictures from the image folder's subfolders too, or stop.
@@ -327,10 +364,7 @@ impl ApplicationHandler for App {
         if !self.mode.interactive() {
             return;
         }
-        let (speed, motion) = self.director.speeds();
-        if (speed - self.cfg.speed).abs() > 1e-4 || (motion - self.cfg.motion).abs() > 1e-4 {
-            let _ = config::save_values(&[("speed", format!("{speed:.2}")), ("motion", format!("{motion:.2}"))]);
-        }
+        self.save_speeds();
     }
 
     fn resumed(&mut self, el: &ActiveEventLoop) {
@@ -464,10 +498,13 @@ impl ApplicationHandler for App {
                             d.next_palette(t);
                             Some("New colours".into())
                         }
-                        "m" => Some(format!("Symmetry: {}", d.next_symmetry().describe())),
+                        "m" => {
+                            self.next_symmetry();
+                            None
+                        }
                         "g" => {
-                            d.toggle_rain();
-                            Some(if d.raining() { "Glyph rain: on" } else { "Glyph rain: off" }.into())
+                            self.toggle_rain();
+                            None
                         }
                         "r" => {
                             d.reverse();
@@ -512,6 +549,7 @@ impl ApplicationHandler for App {
                 if let Some(text) = said {
                     self.say(text);
                 }
+                self.save_speeds();
             }
             WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } if saver => el.exit(),
             // Click: next preset (see render_all). Double-click: fullscreen on / off.
@@ -552,6 +590,7 @@ impl ApplicationHandler for App {
                     } else {
                         format!("Movement speed: {motion:.2}")
                     });
+                    self.save_speeds();
                 }
             }
             WindowEvent::CursorMoved { position, .. } if saver => {
@@ -695,7 +734,9 @@ fn main() {
         configure();
         return;
     }
+    let cfg = config::load();
+    let mode = if mode == Mode::Play { Mode::Windowed { fullscreen: cfg.fullscreen } } else { mode };
     let event_loop = EventLoop::new().expect("failed to start event loop");
-    let mut app = App::new(mode, config::load());
+    let mut app = App::new(mode, cfg);
     event_loop.run_app(&mut app).expect("event loop failed");
 }

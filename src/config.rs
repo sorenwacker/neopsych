@@ -30,6 +30,13 @@ pub struct Config {
     pub hold_background: bool,
     /// Show messages on screen for hotkeys and new presets; the I hotkey switches this.
     pub messages: bool,
+    /// Glyph rain showers now and then; the G hotkey switches this.
+    pub rain: bool,
+    /// "random" lets every preset pick its symmetry; otherwise one kept
+    /// across presets, see director::Symmetry::to_setting. The M hotkey sets it.
+    pub symmetry: String,
+    /// Started with --play: fullscreen or in a window, as last left.
+    pub fullscreen: bool,
 }
 
 impl Default for Config {
@@ -50,6 +57,9 @@ impl Default for Config {
             objects: true,
             hold_background: false,
             messages: true,
+            rain: true,
+            symmetry: "random".into(),
+            fullscreen: true,
         }
     }
 }
@@ -102,9 +112,24 @@ hold_background = false
 
 # false = no messages on screen for hotkeys and presets (the I hotkey switches this)
 messages = true
+
+# false = no glyph rain showers (the G hotkey switches this)
+rain = true
+
+# random = every preset picks its own; or keep one: 1 = none, 1m = left/right
+# mirror, 2 = half turn, 2m to 6m = 2 to 6 mirrors, 3 = 3-fold turn (the M hotkey sets this)
+symmetry = random
+
+# started from the Start menu: true = fullscreen, false = in a window
+# (F, F11 and double-click switch this)
+fullscreen = true
 ";
 
+/// The settings file; NEOPSYCH_CONFIG names another one, e.g. for tests.
 pub fn path() -> PathBuf {
+    if let Some(p) = std::env::var_os("NEOPSYCH_CONFIG") {
+        return PathBuf::from(p);
+    }
     let base = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from))
@@ -170,6 +195,9 @@ pub fn load() -> Config {
             "objects" => c.objects = v.parse().unwrap_or(c.objects),
             "hold_background" => c.hold_background = v.parse().unwrap_or(c.hold_background),
             "messages" => c.messages = v.parse().unwrap_or(c.messages),
+            "rain" => c.rain = v.parse().unwrap_or(c.rain),
+            "symmetry" => c.symmetry = v.to_string(),
+            "fullscreen" => c.fullscreen = v.parse().unwrap_or(c.fullscreen),
             _ => {}
         }
     }

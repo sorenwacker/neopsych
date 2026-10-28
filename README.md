@@ -11,8 +11,8 @@ There are 120 presets: 24 families in 5 variations each.
 
 | How | What happens |
 |---|---|
-| Start menu → **neopsych** | fullscreen, with hotkeys (same as `neopsych.exe --fullscreen`) |
-| `neopsych.exe --window` | in a window, with hotkeys |
+| Start menu → **neopsych** | with hotkeys, fullscreen or in a window as you last left it (`neopsych.exe --play`) |
+| `neopsych.exe --fullscreen` / `--window` | with hotkeys, fullscreen / in a window |
 | `neopsych.exe /s` | as the screensaver: every monitor, any key or mouse movement ends it |
 | `neopsych.exe /c` or no arguments | opens the settings file in Notepad |
 | `neopsych.exe /p <hwnd>` | the small preview in Windows' screensaver settings |
@@ -23,8 +23,8 @@ any input.
 
 ## Keyboard
 
-Press **H** in neopsych for this list. Settings marked *saved* are written to
-the settings file and stay that way next time.
+Press **H** in neopsych for this list. Everything marked *saved* is written to
+the settings file the moment you change it and stays that way next time.
 
 ### Presets
 
@@ -48,8 +48,8 @@ the settings file and stay that way next time.
 | Key | What it does |
 |---|---|
 | **O** | moving shapes (**o**bjects) on / off; off also fades in a clean background (*saved*) |
-| **M** | next **m**irror symmetry: none, left/right, half turn, 2–6 mirrors… |
-| **G** | **g**lyph rain on / off |
+| **M** | **m**irror symmetry: steps from random (each preset picks its own) through none, left/right, half turn, 2–6 mirrors… and back to random (*saved*) |
+| **G** | **g**lyph rain on / off: a shower starts now and more follow, or none at all (*saved*) |
 | **↑ / ↓** | movement faster / slower (*saved*) |
 
 ### Colours
@@ -65,7 +65,7 @@ the settings file and stay that way next time.
 | Key | What it does |
 |---|---|
 | **Space** | pause / resume |
-| **F** or **F11** | fullscreen on / off |
+| **F** or **F11** | fullscreen on / off (*saved*: the Start menu opens it the same way) |
 | **I** | on-screen **i**nfo on / off (*saved*) |
 | **H** | **h**elp: list the hotkeys |
 | **Esc** | quit |
@@ -77,9 +77,9 @@ Holding the arrow keys or **+ −** repeats them; the other keys act once per pr
 | Mouse | What it does |
 |---|---|
 | **Click** | random preset (half a second after the click, so a double-click doesn't count) |
-| **Double-click** | fullscreen on / off |
-| **Wheel** | movement faster / slower |
-| **Right button held + wheel**, or **Shift + wheel** | colour cycling faster / slower |
+| **Double-click** | fullscreen on / off (*saved*) |
+| **Wheel** | movement faster / slower (*saved*) |
+| **Right button held + wheel**, or **Shift + wheel** | colour cycling faster / slower (*saved*) |
 
 ## On-screen messages
 
@@ -109,6 +109,11 @@ The settings file is `%APPDATA%\neopsych\neopsych.ini`; start neopsych with
 | `objects` | true | moving shapes on (**O**) |
 | `hold_background` | false | keep the background (**L**) |
 | `messages` | true | on-screen messages (**I**) |
+| `rain` | true | glyph rain showers (**G**) |
+| `symmetry` | random | `random`, or one kept for every preset: `1` none, `1m` left/right mirror, `2` half turn, `3` 3-fold turn, `2m`–`6m` 2–6 mirrors (**M**) |
+| `fullscreen` | true | how `--play` and the Start menu open it (**F**) |
+
+To try settings without touching yours, point `NEOPSYCH_CONFIG` at another file.
 
 ## Recording
 
