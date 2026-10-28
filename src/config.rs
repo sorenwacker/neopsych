@@ -28,6 +28,8 @@ pub struct Config {
     pub objects: bool,
     /// Keep the background instead of changing it; the L hotkey switches this.
     pub hold_background: bool,
+    /// Show messages on screen for hotkeys and new presets; the N hotkey switches this.
+    pub messages: bool,
 }
 
 impl Default for Config {
@@ -47,6 +49,7 @@ impl Default for Config {
             pictures: true,
             objects: true,
             hold_background: false,
+            messages: true,
         }
     }
 }
@@ -96,6 +99,9 @@ objects = true
 
 # true = keep the background, only the shapes change (the L hotkey switches this)
 hold_background = false
+
+# false = no messages on screen for hotkeys and presets (the N hotkey switches this)
+messages = true
 ";
 
 pub fn path() -> PathBuf {
@@ -163,6 +169,7 @@ pub fn load() -> Config {
             "pictures" => c.pictures = v.parse().unwrap_or(c.pictures),
             "objects" => c.objects = v.parse().unwrap_or(c.objects),
             "hold_background" => c.hold_background = v.parse().unwrap_or(c.hold_background),
+            "messages" => c.messages = v.parse().unwrap_or(c.messages),
             _ => {}
         }
     }

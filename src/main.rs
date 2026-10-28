@@ -57,6 +57,7 @@ S\tpictures from subfolders too on / off
 P\tpictures on / off
 O\tmoving shapes on / off
 L\tkeep the background / let it change
+N\ton-screen info on / off
 C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
@@ -164,11 +165,20 @@ impl App {
         }
     }
 
-    /// Shows `text` briefly on screen.
+    /// Shows `text` briefly on screen, unless messages are off.
     fn say(&mut self, text: impl Into<String>) {
-        if self.mode.interactive() {
+        if self.mode.interactive() && self.cfg.messages {
             self.message = Some((text.into(), Instant::now()));
         }
+    }
+
+    /// Hotkey: on-screen messages on or off. Switching off still says so,
+    /// as the last message. Remembered for next time.
+    fn toggle_messages(&mut self) {
+        self.cfg.messages = !self.cfg.messages;
+        let _ = config::save_values(&[("messages", self.cfg.messages.to_string())]);
+        let text = if self.cfg.messages { "Info: on" } else { "Info: off" };
+        self.message = Some((text.into(), Instant::now()));
     }
 
     /// The current message and how visible it is, if one is showing.
@@ -463,6 +473,10 @@ impl ApplicationHandler for App {
                         }
                         "l" => {
                             self.toggle_hold_background();
+                            None
+                        }
+                        "n" => {
+                            self.toggle_messages();
                             None
                         }
                         "h" => {
