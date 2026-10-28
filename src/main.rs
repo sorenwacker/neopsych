@@ -87,7 +87,9 @@ Esc\tquit";
 fn parse_args() -> Mode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(first) = args.first() else {
-        return if cfg!(windows) { Mode::Configure } else { Mode::Windowed { fullscreen: false } };
+        // Windows runs a screensaver without arguments to configure it;
+        // elsewhere that is how apps start, so open it as last left.
+        return if cfg!(windows) { Mode::Configure } else { Mode::Play };
     };
     let lower = first.to_ascii_lowercase();
     let (flag, inline) = match lower.split_once(':') {

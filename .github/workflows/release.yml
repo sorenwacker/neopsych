@@ -1,0 +1,66 @@
+# Builds the installers when a version tag is pushed (git tag v0.2.0 &&
+# git push origin v0.2.0) and attaches them to that tag's GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --locked
+      - name: Installer
+        shell: pwsh
+        run: |
+          $env:NEOPSYCH_VERSION = "${{ github.ref_name }}".TrimStart("v")
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\windows\neopsych.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.exe
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*.exe
+
+  linux:
+    # The oldest supported runner, so the package also works on older Ubuntus.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: target/debian/*.deb
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: target/debian/*.deb
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app
+        run: bash packaging/macos/bundle.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*.dmg

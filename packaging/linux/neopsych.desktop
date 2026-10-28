@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=neopsych
+Comment=Psychedelic colour-cycling visuals
+Exec=neopsych --play
+Icon=neopsych
+Terminal=false
+Categories=Graphics;

@@ -1,8 +1,9 @@
 [package]
 name = "neopsych"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Palette-cycling psychedelic screensaver that stays cheap at 4K"
+repository = "https://github.com/sorenwacker/neopsych"
 
 [dependencies]
 wgpu = "25"
@@ -14,7 +15,26 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
+[build-dependencies]
+embed-resource = "3"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
 strip = true
+
+# The Ubuntu/Debian package, built with `cargo deb` (see packaging/README.md).
+[package.metadata.deb]
+maintainer = "sorenwacker <https://github.com/sorenwacker>"
+section = "graphics"
+extended-description = """\
+Psychedelic colour-cycling visuals in the spirit of the classic Psychedelic \
+Screen Saver: rotating palettes, shapes that paint trails, patterns and your \
+own pictures, rendered on the GPU so it stays smooth even at 4K."""
+depends = "$auto"
+assets = [
+    ["target/release/neopsych", "usr/bin/", "755"],
+    ["packaging/linux/neopsych.desktop", "usr/share/applications/", "644"],
+    ["assets/neopsych.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["README.md", "usr/share/doc/neopsych/", "644"],
+]
