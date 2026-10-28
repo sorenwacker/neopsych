@@ -28,7 +28,7 @@ pub struct Config {
     pub objects: bool,
     /// Keep the background instead of changing it; the L hotkey switches this.
     pub hold_background: bool,
-    /// Show messages on screen for hotkeys and new presets; the N hotkey switches this.
+    /// Show messages on screen for hotkeys and new presets; the I hotkey switches this.
     pub messages: bool,
 }
 
@@ -100,7 +100,7 @@ objects = true
 # true = keep the background, only the shapes change (the L hotkey switches this)
 hold_background = false
 
-# false = no messages on screen for hotkeys and presets (the N hotkey switches this)
+# false = no messages on screen for hotkeys and presets (the I hotkey switches this)
 messages = true
 ";
 

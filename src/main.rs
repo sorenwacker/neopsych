@@ -49,21 +49,21 @@ const HOTKEYS: &str = "H hotkeys · Left/Right preset · Up/Down movement · Spa
 
 const HELP: &str = "\
 Left / Right\tprevious / next preset
-Click / right-click\tnext / previous preset
+Click\trandom preset
 PgUp / PgDn\tjump a family (5 presets)
 B\tnew background pattern
-I\tshow a wallpaper picture
-S\tpictures from subfolders too on / off
 P\tpictures on / off
+N\tnext picture, now
+S\tpictures from subfolders too on / off
 O\tmoving shapes on / off
 L\tkeep the background / let it change
-N\ton-screen info on / off
+I\ton-screen info on / off
 C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
 R\treverse colour cycling
 + / -\tcolour cycling faster / slower
-Shift + wheel\tcolour cycling faster / slower
+Shift or right button + wheel\tcolour cycling faster / slower
 Up / Down\tmovement faster / slower
 Mouse wheel\tmovement faster / slower
 Space\tpause / resume
@@ -118,6 +118,8 @@ struct App {
     message: Option<(String, Instant)>,
     /// A left click waiting to see whether it becomes a double-click.
     last_click: Option<Instant>,
+    /// Right button held down.
+    right_held: bool,
 }
 
 /// Two clicks closer together than this are a double-click (the Windows default).
@@ -162,6 +164,7 @@ impl App {
             images,
             message: None,
             last_click: None,
+            right_held: false,
         }
     }
 
@@ -263,11 +266,11 @@ impl App {
             return;
         }
         let now = Instant::now();
-        // A click that no second click followed: next preset. It waits so a
-        // double-click doesn't also change the preset.
+        // A click that no second click followed: a random preset. It waits
+        // so a double-click doesn't also change the preset.
         if self.last_click.is_some_and(|t| now - t >= DOUBLE_CLICK) {
             self.last_click = None;
-            self.director.skip(1, self.clock);
+            self.director.random_preset(self.clock);
         }
         // A new preset, by time or by hotkey: name it in the title and on screen.
         if self.mode.interactive() && self.title != self.director.name() {
@@ -433,7 +436,21 @@ impl ApplicationHandler for App {
                             d.next_background(t);
                             Some("New background".into())
                         }
-                        "i" => Some(if d.show_picture(t) { "Picture" } else { "No picture ready yet" }.into()),
+                        "i" => {
+                            self.toggle_messages();
+                            None
+                        }
+                        // N: next picture, now.
+                        "n" => Some(
+                            if !self.cfg.pictures {
+                                "Pictures are off (P)"
+                            } else if d.show_picture(t) {
+                                "Picture"
+                            } else {
+                                "No picture ready yet"
+                            }
+                            .into(),
+                        ),
                         "c" => {
                             d.next_palette(t);
                             Some("New colours".into())
@@ -475,10 +492,6 @@ impl ApplicationHandler for App {
                             self.toggle_hold_background();
                             None
                         }
-                        "n" => {
-                            self.toggle_messages();
-                            None
-                        }
                         "h" => {
                             show_help();
                             None
@@ -504,14 +517,12 @@ impl ApplicationHandler for App {
                     self.last_click = Some(now);
                 }
             }
-            // Right-click: previous preset.
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. }
-                if self.mode.interactive() =>
-            {
-                self.director.skip(-1, self.clock);
+            // Right button: scrolling while it is held changes the colour speed.
+            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } if self.mode.interactive() => {
+                self.right_held = state == ElementState::Pressed;
             }
             WindowEvent::ModifiersChanged(m) => self.shift = m.state().shift_key(),
-            // Scroll: movement speed. Shift + scroll: colour speed.
+            // Scroll: movement speed. Shift or right button + scroll: colour speed.
             WindowEvent::MouseWheel { delta, .. } => {
                 let up = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -519,14 +530,15 @@ impl ApplicationHandler for App {
                 };
                 if up != 0.0 {
                     let factor = if up > 0.0 { 1.15 } else { 1.0 / 1.15 };
-                    let (cycle, motion) = if self.shift {
+                    let colour = self.shift || self.right_held;
+                    let (cycle, motion) = if colour {
                         self.director.scale_cycle(factor);
                         self.director.speeds()
                     } else {
                         self.director.scale_motion(factor);
                         self.director.speeds()
                     };
-                    self.say(if self.shift {
+                    self.say(if colour {
                         format!("Colour speed: {cycle:.2}")
                     } else {
                         format!("Movement speed: {motion:.2}")

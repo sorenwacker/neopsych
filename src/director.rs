@@ -308,6 +308,15 @@ impl Director {
         (self.cycle_mult, self.motion_mult)
     }
 
+    /// Jumps to a random preset other than the current one.
+    pub fn random_preset(&mut self, t: f64) {
+        let i = (self.preset + 1 + self.order.below(presets::COUNT as u32 - 1) as usize) % presets::COUNT;
+        if self.fixed.is_some() {
+            self.fixed = Some(i);
+        }
+        self.start_preset(i, t);
+    }
+
     /// Steps `delta` presets forward or back from the current one.
     pub fn skip(&mut self, delta: i32, t: f64) {
         let n = presets::COUNT as i32;
