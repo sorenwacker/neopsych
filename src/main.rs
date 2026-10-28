@@ -49,6 +49,7 @@ const HOTKEYS: &str = "H hotkeys · Left/Right preset · Up/Down movement · Spa
 
 const HELP: &str = "\
 Left / Right\tprevious / next preset
+Click / right-click\tnext / previous preset
 PgUp / PgDn\tjump a family (5 presets)
 B\tnew background pattern
 I\tshow a wallpaper picture
@@ -114,7 +115,7 @@ struct App {
     images: Option<Images>,
     /// On-screen message and when it appeared; interactive mode only.
     message: Option<(String, Instant)>,
-    /// When the left mouse button last went down, to spot a double-click.
+    /// A left click waiting to see whether it becomes a double-click.
     last_click: Option<Instant>,
 }
 
@@ -252,6 +253,12 @@ impl App {
             return;
         }
         let now = Instant::now();
+        // A click that no second click followed: next preset. It waits so a
+        // double-click doesn't also change the preset.
+        if self.last_click.is_some_and(|t| now - t >= DOUBLE_CLICK) {
+            self.last_click = None;
+            self.director.skip(1, self.clock);
+        }
         // A new preset, by time or by hotkey: name it in the title and on screen.
         if self.mode.interactive() && self.title != self.director.name() {
             self.title = self.director.name().to_string();
@@ -471,7 +478,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } if saver => el.exit(),
-            // Double-click: fullscreen on / off.
+            // Click: next preset (see render_all). Double-click: fullscreen on / off.
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }
                 if self.mode.interactive() =>
             {
@@ -482,6 +489,12 @@ impl ApplicationHandler for App {
                 } else {
                     self.last_click = Some(now);
                 }
+            }
+            // Right-click: previous preset.
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. }
+                if self.mode.interactive() =>
+            {
+                self.director.skip(-1, self.clock);
             }
             WindowEvent::ModifiersChanged(m) => self.shift = m.state().shift_key(),
             // Scroll: movement speed. Shift + scroll: colour speed.
