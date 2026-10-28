@@ -47,27 +47,36 @@ impl Mode {
 
 const HOTKEYS: &str = "H hotkeys · Left/Right preset · Up/Down movement · Space pause · F fullscreen · Esc quit";
 
+// Keep in step with the hotkey tables in README.md.
 const HELP: &str = "\
+PRESETS
 Left / Right\tprevious / next preset
-Click\trandom preset
 PgUp / PgDn\tjump a family (5 presets)
+Click\trandom preset
+
+BACKGROUND AND PICTURES
 B\tnew background pattern
+L\tkeep the background / let it change
 P\tpictures on / off
 N\tnext picture, now
 S\tpictures from subfolders too on / off
+
+SHAPES
 O\tmoving shapes on / off
-L\tkeep the background / let it change
-I\ton-screen info on / off
-C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
+Up / Down, wheel\tmovement faster / slower
+
+COLOURS
+C\tblend into new colours
 R\treverse colour cycling
 + / -\tcolour cycling faster / slower
 Shift or right button + wheel\tcolour cycling faster / slower
-Up / Down\tmovement faster / slower
-Mouse wheel\tmovement faster / slower
+
+VIEW
 Space\tpause / resume
-F, F11 or double-click\ttoggle fullscreen
+F, F11, double-click\tfullscreen on / off
+I\ton-screen info on / off
 H\tthis help
 Esc\tquit";
 
