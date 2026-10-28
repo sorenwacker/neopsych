@@ -234,6 +234,8 @@ pub struct Director {
     /// Set by the app: draw the moving shapes. While false they stand still,
     /// and carry on from there when switched back on. Rain is separate.
     pub show_objects: bool,
+    /// Set by the app: keep the background, only changing it by hotkey.
+    pub hold_background: bool,
     new_image: bool,
 }
 
@@ -289,6 +291,7 @@ impl Director {
             image_chance,
             image_ready: false,
             show_objects: true,
+            hold_background: false,
             new_image: false,
         };
         d.start_preset(preset, 0.0);
@@ -330,7 +333,7 @@ impl Director {
             self.rain_switch = t + self.order.range(gap.0, gap.1) as f64;
         }
         // A fresh background now and then within the preset, sometimes a picture.
-        if t >= self.next_field && !self.field_active {
+        if t >= self.next_field && !self.field_active && !self.hold_background {
             let picture = self.roll_picture();
             self.begin_background(t, picture);
         }
@@ -403,8 +406,11 @@ impl Director {
         self.preset_end = t + self.preset_seconds as f64;
         self.next_event = t + self.rng.range(EVENT_EVERY.0, EVENT_EVERY.1) as f64;
 
-        let picture = self.roll_picture();
-        self.begin_background(t, picture);
+        // A held background stays through preset changes too.
+        let picture = !self.hold_background && self.roll_picture();
+        if !self.hold_background {
+            self.begin_background(t, picture);
+        }
 
         let r = &mut self.rng;
         self.theme = r.pick(recipe.shapes);

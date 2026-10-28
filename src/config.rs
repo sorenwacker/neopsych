@@ -26,6 +26,8 @@ pub struct Config {
     pub pictures: bool,
     /// The moving shapes switched on; the O hotkey switches them.
     pub objects: bool,
+    /// Keep the background instead of changing it; the L hotkey switches this.
+    pub hold_background: bool,
 }
 
 impl Default for Config {
@@ -44,6 +46,7 @@ impl Default for Config {
             image_chance: 0.9,
             pictures: true,
             objects: true,
+            hold_background: false,
         }
     }
 }
@@ -90,6 +93,9 @@ pictures = true
 
 # false = no moving shapes, just the backgrounds (the O hotkey switches this)
 objects = true
+
+# true = keep the background, only the shapes change (the L hotkey switches this)
+hold_background = false
 ";
 
 pub fn path() -> PathBuf {
@@ -156,6 +162,7 @@ pub fn load() -> Config {
             "image_chance" => c.image_chance = v.parse().unwrap_or(c.image_chance).clamp(0.0, 1.0),
             "pictures" => c.pictures = v.parse().unwrap_or(c.pictures),
             "objects" => c.objects = v.parse().unwrap_or(c.objects),
+            "hold_background" => c.hold_background = v.parse().unwrap_or(c.hold_background),
             _ => {}
         }
     }

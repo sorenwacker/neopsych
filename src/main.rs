@@ -55,6 +55,7 @@ I\tshow a wallpaper picture
 S\tpictures from subfolders too on / off
 P\tpictures on / off
 O\tmoving shapes on / off
+L\tkeep the background / let it change
 C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
@@ -227,6 +228,13 @@ impl App {
         self.say(if self.cfg.pictures { "Pictures: on" } else { "Pictures: off" });
     }
 
+    /// Hotkey: keep the background, or let it change again. Remembered for next time.
+    fn toggle_hold_background(&mut self) {
+        self.cfg.hold_background = !self.cfg.hold_background;
+        let _ = config::save_values(&[("hold_background", self.cfg.hold_background.to_string())]);
+        self.say(if self.cfg.hold_background { "Background: kept" } else { "Background: changing" });
+    }
+
     /// Hotkey: the moving shapes on or off. Off also fades in a clean
     /// background of the same kind, since the trails they painted would
     /// otherwise stay. Remembered for next time.
@@ -259,6 +267,7 @@ impl App {
         self.clock += dt as f64;
         self.director.image_ready = self.cfg.pictures && self.images.as_mut().is_some_and(|i| i.poll());
         self.director.show_objects = self.cfg.objects;
+        self.director.hold_background = self.cfg.hold_background;
         let frame = self.director.update(self.clock, dt);
         if frame.new_image {
             if let Some(img) = self.images.as_mut().and_then(|i| i.take()) {
@@ -443,6 +452,10 @@ impl ApplicationHandler for App {
                         }
                         "o" => {
                             self.toggle_objects();
+                            None
+                        }
+                        "l" => {
+                            self.toggle_hold_background();
                             None
                         }
                         "h" => {
