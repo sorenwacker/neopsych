@@ -231,6 +231,9 @@ pub struct Director {
     image_chance: f32,
     /// Set by the app each frame: a decoded picture is waiting.
     pub image_ready: bool,
+    /// Set by the app: draw the moving shapes. While false they stand still,
+    /// and carry on from there when switched back on. Rain is separate.
+    pub show_objects: bool,
     new_image: bool,
 }
 
@@ -285,6 +288,7 @@ impl Director {
             cycle_target: 0.1,
             image_chance,
             image_ready: false,
+            show_objects: true,
             new_image: false,
         };
         d.start_preset(preset, 0.0);
@@ -357,7 +361,8 @@ impl Director {
         self.offset = (self.offset + (self.cycle * self.cycle_mult * dt) as f64).rem_euclid(1.0);
 
         let move_dt = dt * self.motion_mult;
-        let brushes = self.objects.iter_mut().chain(&mut self.drops).map(|o| o.step(move_dt)).collect();
+        let shown = if self.show_objects { self.objects.len() } else { 0 };
+        let brushes = self.objects[..shown].iter_mut().chain(&mut self.drops).map(|o| o.step(move_dt)).collect();
         self.drops.retain(|d| d.pos[1] < GONE);
 
         Frame {
@@ -438,6 +443,11 @@ impl Director {
             self.begin_background(t, true);
         }
         self.image_ready
+    }
+
+    /// The background showing or fading in is a picture.
+    pub fn showing_picture(&self) -> bool {
+        self.field.mode == presets::IMAGE
     }
 
     /// Whether the next background should be a picture. Decided with the

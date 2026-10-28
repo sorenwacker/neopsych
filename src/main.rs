@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId, WindowLevel};
@@ -53,6 +53,8 @@ PgUp / PgDn\tjump a family (5 presets)
 B\tnew background pattern
 I\tshow a wallpaper picture
 S\tpictures from subfolders too on / off
+P\tpictures on / off
+O\tmoving shapes on / off
 C\tblend into new colours
 M\tnext symmetry
 G\tglyph rain on / off
@@ -62,7 +64,7 @@ Shift + wheel\tcolour cycling faster / slower
 Up / Down\tmovement faster / slower
 Mouse wheel\tmovement faster / slower
 Space\tpause / resume
-F or F11\ttoggle fullscreen
+F, F11 or double-click\ttoggle fullscreen
 H\tthis help
 Esc\tquit";
 
@@ -111,7 +113,12 @@ struct App {
     images: Option<Images>,
     /// On-screen message and when it appeared; interactive mode only.
     message: Option<(String, Instant)>,
+    /// When the left mouse button last went down, to spot a double-click.
+    last_click: Option<Instant>,
 }
+
+/// Two clicks closer together than this are a double-click (the Windows default).
+const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// Seconds a message stays fully visible, then fades out over the next half.
 const MESSAGE_SECONDS: f32 = 2.0;
@@ -151,6 +158,7 @@ impl App {
             title: String::new(),
             images,
             message: None,
+            last_click: None,
         }
     }
 
@@ -208,6 +216,29 @@ impl App {
         self.say(if self.cfg.image_subfolders { "Pictures: with subfolders" } else { "Pictures: top folder only" });
     }
 
+    /// Hotkey: pictures on or off. Off fades a picture that is showing over
+    /// to a pattern. Remembered for next time.
+    fn toggle_pictures(&mut self) {
+        self.cfg.pictures = !self.cfg.pictures;
+        if !self.cfg.pictures && self.director.showing_picture() {
+            self.director.next_background(self.clock);
+        }
+        let _ = config::save_values(&[("pictures", self.cfg.pictures.to_string())]);
+        self.say(if self.cfg.pictures { "Pictures: on" } else { "Pictures: off" });
+    }
+
+    /// Hotkey: the moving shapes on or off. Off also fades in a clean
+    /// background of the same kind, since the trails they painted would
+    /// otherwise stay. Remembered for next time.
+    fn toggle_objects(&mut self) {
+        self.cfg.objects = !self.cfg.objects;
+        if !self.cfg.objects && !(self.director.showing_picture() && self.director.show_picture(self.clock)) {
+            self.director.next_background(self.clock);
+        }
+        let _ = config::save_values(&[("objects", self.cfg.objects.to_string())]);
+        self.say(if self.cfg.objects { "Moving shapes: on" } else { "Moving shapes: off" });
+    }
+
     fn render_all(&mut self) {
         if self.gpu.is_none() {
             return;
@@ -226,7 +257,8 @@ impl App {
         let dt = if self.paused { 0.0 } else { (now - self.last).as_secs_f32().min(0.25) };
         self.last = now;
         self.clock += dt as f64;
-        self.director.image_ready = self.images.as_mut().is_some_and(|i| i.poll());
+        self.director.image_ready = self.cfg.pictures && self.images.as_mut().is_some_and(|i| i.poll());
+        self.director.show_objects = self.cfg.objects;
         let frame = self.director.update(self.clock, dt);
         if frame.new_image {
             if let Some(img) = self.images.as_mut().and_then(|i| i.take()) {
@@ -405,6 +437,14 @@ impl ApplicationHandler for App {
                             self.toggle_subfolders();
                             None
                         }
+                        "p" => {
+                            self.toggle_pictures();
+                            None
+                        }
+                        "o" => {
+                            self.toggle_objects();
+                            None
+                        }
                         "h" => {
                             show_help();
                             None
@@ -418,6 +458,18 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } if saver => el.exit(),
+            // Double-click: fullscreen on / off.
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }
+                if self.mode.interactive() =>
+            {
+                let now = Instant::now();
+                if self.last_click.is_some_and(|t| now - t < DOUBLE_CLICK) {
+                    self.toggle_fullscreen(id);
+                    self.last_click = None;
+                } else {
+                    self.last_click = Some(now);
+                }
+            }
             WindowEvent::ModifiersChanged(m) => self.shift = m.state().shift_key(),
             // Scroll: movement speed. Shift + scroll: colour speed.
             WindowEvent::MouseWheel { delta, .. } => {

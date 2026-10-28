@@ -22,6 +22,10 @@ pub struct Config {
     pub image_subfolders: bool,
     /// Chance that a preset opens with a picture instead of a pattern.
     pub image_chance: f32,
+    /// Pictures switched on; the P hotkey turns them off without losing image_chance.
+    pub pictures: bool,
+    /// The moving shapes switched on; the O hotkey switches them.
+    pub objects: bool,
 }
 
 impl Default for Config {
@@ -38,6 +42,8 @@ impl Default for Config {
             image_folder: None,
             image_subfolders: false,
             image_chance: 0.9,
+            pictures: true,
+            objects: true,
         }
     }
 }
@@ -78,6 +84,12 @@ image_subfolders = false
 
 # chance (0 to 1) that a new background is a picture; 0 turns pictures off
 image_chance = 0.9
+
+# false = patterns only for now (the P hotkey switches this)
+pictures = true
+
+# false = no moving shapes, just the backgrounds (the O hotkey switches this)
+objects = true
 ";
 
 pub fn path() -> PathBuf {
@@ -142,6 +154,8 @@ pub fn load() -> Config {
             "image_folder" => c.image_folder = (!v.is_empty()).then(|| PathBuf::from(v.trim_matches('"'))),
             "image_subfolders" => c.image_subfolders = v.parse().unwrap_or(c.image_subfolders),
             "image_chance" => c.image_chance = v.parse().unwrap_or(c.image_chance).clamp(0.0, 1.0),
+            "pictures" => c.pictures = v.parse().unwrap_or(c.pictures),
+            "objects" => c.objects = v.parse().unwrap_or(c.objects),
             _ => {}
         }
     }
