@@ -22,7 +22,30 @@ const GONE: f32 = 100.0;
 const EVENT_EVERY: (f32, f32) = (4.0, 12.0);
 /// Fastest colour cycling, in palette turns per second, before the speed
 /// hotkeys scale it: surges and presets never go past this.
-const MAX_CYCLE: f32 = 0.6;
+const MAX_CYCLE: f32 = 0.35;
+/// The colour cycling holds a speed for SURGE_HOLD seconds, then glides over
+/// SURGE_GLIDE seconds to a new one: SURGE times the preset's pace.
+const SURGE: (f32, f32) = (0.5, 1.5);
+const SURGE_HOLD: (f32, f32) = (6.0, 20.0);
+const SURGE_GLIDE: (f32, f32) = (1.5, 4.0);
+
+/// One step of the colour cycling's speed: gliding from rom to 	o,
+/// then holding until 
+ext.
+struct Surge {
+    from: f32,
+    to: f32,
+    start: f64,
+    glide: f32,
+    next: f64,
+}
+
+impl Surge {
+    fn at(&self, t: f64) -> f32 {
+        let k = (((t - self.start) as f32) / self.glide).clamp(0.0, 1.0);
+        self.from + (self.to - self.from) * ease(k)
+    }
+}
 /// The symmetries a preset can get, with how often (out of 40) it gets each.
 /// The M hotkey steps through them in this order.
 const SYMMETRIES: [(Symmetry, u32); 9] = [
@@ -248,8 +271,8 @@ pub struct Director {
     offset: f64,
     cycle: f32,
     cycle_target: f32,
-    /// Where the two waves that vary the cycling speed start; see update.
-    surge_phase: [f32; 2],
+    /// The speed step the colour cycling is on; see update.
+    surge: Surge,
     image_chance: f32,
     /// Set by the app each frame: a decoded picture is waiting.
     pub image_ready: bool,
@@ -278,7 +301,6 @@ impl Director {
     ) -> Self {
         let mut order = Rng::new(seed);
         let preset = pick_preset(&mut order, fixed);
-        let surge_phase = [order.range(0.0, TAU), order.range(0.0, TAU)];
         let (recipe, name, pseed) = presets::get(preset);
         let mut rng = Rng::new(pseed);
         let pal = palette::random_of(&mut rng, recipe.palettes);
@@ -316,7 +338,7 @@ impl Director {
             offset: 0.0,
             cycle: 0.0,
             cycle_target: 0.1,
-            surge_phase,
+            surge: Surge { from: 1.0, to: 1.0, start: 0.0, glide: 1.0, next: 0.0 },
             image_chance,
             image_ready: false,
             show_objects: true,
@@ -410,13 +432,18 @@ impl Director {
         }
 
         self.cycle += (self.cycle_target - self.cycle) * (dt * 0.7).min(1.0);
-        // On top of the preset's pace, two slow waves at unrelated
-        // frequencies make the cycling surge, ease off, sometimes stop or
-        // turn back for a moment, without ever settling into one rhythm.
-        let ts = t as f32;
-        let surge =
-            1.0 + 0.85 * (0.11 * ts + self.surge_phase[0]).sin() + 0.45 * (0.047 * ts + self.surge_phase[1]).sin();
-        let pace = (self.cycle * surge).clamp(-MAX_CYCLE, MAX_CYCLE);
+        // On top of the preset's pace the cycling holds a speed for a while,
+        // then glides to a new one: a smoothed staircase, not a wave.
+        if t >= self.surge.next {
+            self.surge = Surge {
+                from: self.surge.at(t),
+                to: self.order.range(SURGE.0, SURGE.1),
+                start: t,
+                glide: self.order.range(SURGE_GLIDE.0, SURGE_GLIDE.1),
+                next: t + self.order.range(SURGE_HOLD.0, SURGE_HOLD.1) as f64,
+            };
+        }
+        let pace = (self.cycle * self.surge.at(t)).clamp(-MAX_CYCLE, MAX_CYCLE);
         self.offset = (self.offset + (pace * self.cycle_mult * dt) as f64).rem_euclid(1.0);
 
         let move_dt = dt * self.motion_mult;
