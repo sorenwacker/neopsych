@@ -143,6 +143,22 @@ float luma(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
+// How far the palette has turned, in cycles. It turns at `speed` on average,
+// but a mix of two slow waves at unrelated frequencies makes it speed up to
+// about three times that, slow down, sometimes stop or turn back, and never
+// repeat exactly, like neopsych's changes of pace. This is the integral of
+// 2 speed (0.5 + 0.7 sin(0.11 t) + 0.4 sin(0.047 t + 1.3)).
+float rotation(float t) {
+    return 2.0 * speed * (0.5 * t - 0.7 / 0.11 * cos(0.11 * t) - 0.4 / 0.047 * cos(0.047 * t + 1.3));
+}
+
+// Counts palettes: one per `period` seconds on average, but drifting
+// between quicker and slower changes. Always increasing, since the wobble's
+// slope (0.35 * 0.13 + 0.2 * 0.071) stays below 1 / 12.
+float palette_clock(float t) {
+    return t / period + (12.0 / period) * (0.35 * sin(0.13 * t) + 0.2 * sin(0.071 * t + 2.0));
+}
+
 vec4 hook() {
     vec4 src = HOOKED_tex(HOOKED_pos);
     float t = SECONDS;
@@ -156,10 +172,12 @@ vec4 hook() {
         }
     }
     lum /= 16.0;
-    float x = lum * bands + t * speed;
-    // Always on the way from palette n to palette n + 1.
-    float n = floor(t / period);
-    float k = smoothstep(0.0, 1.0, fract(t / period));
+    float x = lum * bands + rotation(t);
+    // Always on the way from palette n to palette n + 1, at a pace that
+    // keeps drifting instead of a fixed beat.
+    float u = palette_clock(t);
+    float n = floor(u);
+    float k = smoothstep(0.0, 1.0, fract(u));
     vec3 col = mix(palette(n, x), palette(n + 1.0, x), k);
     return vec4(mix(src.rgb, col, amount), src.a);
 }
