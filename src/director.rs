@@ -245,6 +245,8 @@ pub struct Director {
     offset: f64,
     cycle: f32,
     cycle_target: f32,
+    /// Where the two waves that vary the cycling speed start; see update.
+    surge_phase: [f32; 2],
     image_chance: f32,
     /// Set by the app each frame: a decoded picture is waiting.
     pub image_ready: bool,
@@ -273,6 +275,7 @@ impl Director {
     ) -> Self {
         let mut order = Rng::new(seed);
         let preset = pick_preset(&mut order, fixed);
+        let surge_phase = [order.range(0.0, TAU), order.range(0.0, TAU)];
         let (recipe, name, pseed) = presets::get(preset);
         let mut rng = Rng::new(pseed);
         let pal = palette::random_of(&mut rng, recipe.palettes);
@@ -310,6 +313,7 @@ impl Director {
             offset: 0.0,
             cycle: 0.0,
             cycle_target: 0.1,
+            surge_phase,
             image_chance,
             image_ready: false,
             show_objects: true,
@@ -373,11 +377,17 @@ impl Director {
             let picture = self.roll_picture();
             self.begin_background(t, picture);
         }
-        // The palette is always on its way to the next one.
+        // The palette moves on to a new one, quickly or slowly, and now and
+        // then stays a while first, so the changes have no steady rhythm.
         if t >= self.pal_start + self.pal_dur as f64 {
             self.pal_from = self.pal_to;
-            let dur = self.rng.range(8.0, 16.0);
-            self.blend_palette_to_new(t, dur);
+            if self.rng.chance(0.35) {
+                self.pal_start = t;
+                self.pal_dur = self.rng.range(3.0, 12.0);
+            } else {
+                let dur = self.rng.range(4.0, 25.0);
+                self.blend_palette_to_new(t, dur);
+            }
         }
 
         let field = if self.field_active {
@@ -397,7 +407,13 @@ impl Director {
         }
 
         self.cycle += (self.cycle_target - self.cycle) * (dt * 0.7).min(1.0);
-        self.offset = (self.offset + (self.cycle * self.cycle_mult * dt) as f64).rem_euclid(1.0);
+        // On top of the preset's pace, two slow waves at unrelated
+        // frequencies make the cycling surge, ease off, sometimes stop or
+        // turn back for a moment, without ever settling into one rhythm.
+        let ts = t as f32;
+        let surge =
+            1.0 + 0.85 * (0.11 * ts + self.surge_phase[0]).sin() + 0.45 * (0.047 * ts + self.surge_phase[1]).sin();
+        self.offset = (self.offset + (self.cycle * surge * self.cycle_mult * dt) as f64).rem_euclid(1.0);
 
         let move_dt = dt * self.motion_mult;
         let shown = if self.show_objects { self.objects.len() } else { 0 };
