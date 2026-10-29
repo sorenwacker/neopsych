@@ -100,7 +100,7 @@ The settings file is `%APPDATA%\neopsych\neopsych.ini`; start neopsych with
 | `speed` | 1.0 | colour cycling speed (**+ / −**) |
 | `motion` | 1.0 | shape movement speed (**↑ / ↓**) |
 | `preset_seconds` | 60 | seconds per preset |
-| `transition_seconds` | 15 | average seconds between new backgrounds |
+| `transition_seconds` | 45 | average seconds between new backgrounds, independent of preset changes |
 | `preset` | 0 | 0 = all presets in random order; 1–120 = stay on one |
 | `image_folder` | *(empty)* | folder of pictures; empty = your Pictures folder |
 | `image_subfolders` | false | also use pictures in its subfolders (**S**) |

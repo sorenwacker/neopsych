@@ -48,7 +48,7 @@ impl Default for Config {
             speed: 1.0,
             motion: 1.0,
             preset_seconds: 60.0,
-            transition_seconds: 15.0,
+            transition_seconds: 45.0,
             preset: 0,
             image_folder: None,
             image_subfolders: false,
@@ -85,8 +85,8 @@ motion = 1.0
 # seconds before moving on to the next preset
 preset_seconds = 60
 
-# average seconds between new background patterns within a preset
-transition_seconds = 15
+# average seconds between new backgrounds (independent of preset changes)
+transition_seconds = 45
 
 # 0 = play all 120 presets in random order, 1-120 = stay on one
 preset = 0

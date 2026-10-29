@@ -517,11 +517,8 @@ impl Director {
         self.preset_end = t + self.preset_seconds as f64;
         self.next_event = t + self.rng.range(EVENT_EVERY.0, EVENT_EVERY.1) as f64;
 
-        // A held background stays through preset changes too.
-        let picture = !self.hold_background && self.roll_picture();
-        if !self.hold_background {
-            self.begin_background(t, picture);
-        }
+        // Backgrounds run on their own clock (see update), not with presets.
+        let picture = self.showing_picture();
 
         let r = &mut self.rng;
         self.theme = r.pick(recipe.shapes);
