@@ -332,10 +332,6 @@ impl Target {
             self.blend = 1.0;
         }
         self.needs_full = false;
-        // A zooming, drifting picture is drawn afresh every frame.
-        if frame.moving_picture && draw.is_none() {
-            draw = Some(frame.field.unwrap_or(frame.base));
-        }
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
             pass.set_pipeline(&gpu.field_pipeline);

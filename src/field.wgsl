@@ -80,11 +80,9 @@ fn field(p: vec2<f32>, px: vec2<u32>) -> f32 {
             return length(q) * P.b.x + atan2(q.y, q.x) / TAU * P.b.y;
         }
         // picture, stretched to fill the screen: brightness picks the palette entry.
-        // a.x = cycles across black..white, a.y = start; b.x = zoom (1 = the
-        // whole picture), a.zw = how far the view has drifted from the centre.
+        // a.x = cycles across black..white, a.y = start.
         case 7u: {
-            let screen = (vec2<f32>(px) + 0.5) / vec2<f32>(P.size);
-            let uv = (screen - 0.5) / max(P.b.x, 1.0) + 0.5 + P.a.zw;
+            let uv = (vec2<f32>(px) + 0.5) / vec2<f32>(P.size);
             let lum = textureSampleLevel(picture, picture_sampler, uv, 0.0).r;
             return lum * P.a.x + P.a.y;
         }

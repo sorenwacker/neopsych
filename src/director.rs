@@ -145,9 +145,6 @@ pub struct Frame {
     pub offset: f32,
     /// The field is a new picture: upload the next image before drawing it.
     pub new_image: bool,
-    /// The background is a picture that zooms and drifts, so it is redrawn
-    /// every frame (which also wipes the shapes' trails across it).
-    pub moving_picture: bool,
     pub symmetry: Symmetry,
 }
 
@@ -420,13 +417,12 @@ impl Director {
             self.blend_palette_to_new(t, dur);
         }
 
-        let background = self.picture_at(t);
         let field = if self.field_active {
             let p = ((t - self.field_start) as f32 / self.field_dur).min(1.0);
             if p >= 1.0 {
                 self.field_active = false;
             }
-            Some(FieldJob { progress: ease(p), ..background })
+            Some(FieldJob { progress: ease(p), ..self.field })
         } else {
             None
         };
@@ -460,32 +456,12 @@ impl Director {
         Frame {
             field,
             brushes,
-            base: FieldJob { progress: 1.0, ..background },
+            base: FieldJob { progress: 1.0, ..self.field },
             palette: palette::to_rgba8(&self.current_palette(t)),
             offset: self.offset as f32,
             new_image: std::mem::take(&mut self.new_image),
-            moving_picture: background.mode == presets::IMAGE,
             symmetry: self.symmetry,
         }
-    }
-
-    /// The current background, with a picture's slow zoom and drift applied
-    /// for time t: b.x is the zoom, a.zw the shift. They move steadily over
-    /// the picture's expected time on screen.
-    fn picture_at(&self, t: f64) -> FieldJob {
-        let mut f = self.field;
-        if f.mode == presets::IMAGE {
-            let life = if self.hold_background { 90.0 } else { self.field_dur + self.transition_seconds * 1.33 };
-            let p = ((t - self.field_start) as f32 / life).min(1.0);
-            let [from, to, dx, dy] = f.c;
-            let zoom = from + (to - from) * p;
-            // Never further than the zoom leaves room for, so no edge shows.
-            let room = (1.0 - 1.0 / zoom) * 0.5 * p;
-            f.a[2] = dx * room;
-            f.a[3] = dy * room;
-            f.b[0] = zoom;
-        }
-        f
     }
 
     fn current_palette(&self, t: f64) -> Palette {
@@ -585,12 +561,6 @@ impl Director {
             // a.x: palette cycles across black..white, a.y: starting colour.
             self.field.mode = presets::IMAGE;
             self.field.a = [self.order.range(0.7, 2.0), self.order.f(), 0.0, 0.0];
-            // c: zoom at the start and end of its time on screen, and the
-            // direction it drifts in; see picture_at.
-            let (near, far) = (self.order.range(1.15, 1.3), self.order.range(1.0, 1.05));
-            let (from, to) = if self.order.chance(0.5) { (far, near) } else { (near, far) };
-            let dir = self.order.range(0.0, TAU);
-            self.field.c = [from, to, dir.cos(), dir.sin()];
             self.new_image = true;
         }
     }
