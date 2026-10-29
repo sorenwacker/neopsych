@@ -28,6 +28,10 @@ const MAX_CYCLE: f32 = 0.35;
 const SURGE: (f32, f32) = (0.5, 1.5);
 const SURGE_HOLD: (f32, f32) = (6.0, 20.0);
 const SURGE_GLIDE: (f32, f32) = (1.5, 4.0);
+/// Each palette holds for PALETTE_HOLD seconds, then morphs into the next over
+/// MORPH seconds.
+const PALETTE_HOLD: (f32, f32) = (6.0, 20.0);
+const MORPH: (f32, f32) = (2.5, 5.0);
 
 /// One step of the colour cycling's speed: gliding from `from` to `to`,
 /// then holding until `next`.
@@ -266,6 +270,8 @@ pub struct Director {
     pal_to: Palette,
     pal_start: f64,
     pal_dur: f32,
+    /// When the next palette morph starts.
+    pal_next: f64,
     /// Palette rotation, and how fast it turns (cycles per second) on its
     /// way to the preset's target speed.
     offset: f64,
@@ -335,6 +341,7 @@ impl Director {
             pal_to: pal,
             pal_start: 0.0,
             pal_dur: 1.0,
+            pal_next: 0.0,
             offset: 0.0,
             cycle: 0.0,
             cycle_target: 0.1,
@@ -402,17 +409,12 @@ impl Director {
             let picture = self.roll_picture();
             self.begin_background(t, picture);
         }
-        // The palette moves on to a new one, quickly or slowly, and now and
-        // then stays a while first, so the changes have no steady rhythm.
-        if t >= self.pal_start + self.pal_dur as f64 {
-            self.pal_from = self.pal_to;
-            if self.rng.chance(0.25) {
-                self.pal_start = t;
-                self.pal_dur = self.rng.range(3.0, 12.0);
-            } else {
-                let dur = self.rng.range(5.0, 20.0);
-                self.blend_palette_to_new(t, dur);
-            }
+        // The palette holds, then morphs to the next in one smooth step:
+        // a smoothed staircase rather than an endless wave.
+        if t >= self.pal_next {
+            self.pal_from = self.current_palette(t);
+            let dur = self.rng.range(MORPH.0, MORPH.1);
+            self.blend_palette_to_new(t, dur);
         }
 
         let field = if self.field_active {
@@ -467,11 +469,13 @@ impl Director {
         palette::lerp(&self.pal_from, &self.pal_to, ease(k))
     }
 
-    /// Starts a `dur` second blend from pal_from into a new random palette.
+    /// Starts a `dur` second blend from pal_from into a new random palette,
+    /// which then holds for a while before the next.
     fn blend_palette_to_new(&mut self, t: f64, dur: f32) {
         self.pal_to = palette::random_of(&mut self.rng, self.recipe.palettes);
         self.pal_start = t;
         self.pal_dur = dur;
+        self.pal_next = t + (dur + self.rng.range(PALETTE_HOLD.0, PALETTE_HOLD.1)) as f64;
     }
 
     /// How many objects and rain drops fit on the GPU with the current symmetry.
