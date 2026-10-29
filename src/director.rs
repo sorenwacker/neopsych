@@ -20,6 +20,9 @@ const RAIN_LASTS: (f32, f32) = (20.0, 40.0);
 const GONE: f32 = 100.0;
 /// Seconds between small surprises within a preset.
 const EVENT_EVERY: (f32, f32) = (4.0, 12.0);
+/// Fastest colour cycling, in palette turns per second, before the speed
+/// hotkeys scale it: surges and presets never go past this.
+const MAX_CYCLE: f32 = 0.35;
 /// The symmetries a preset can get, with how often (out of 40) it gets each.
 /// The M hotkey steps through them in this order.
 const SYMMETRIES: [(Symmetry, u32); 9] = [
@@ -385,7 +388,7 @@ impl Director {
                 self.pal_start = t;
                 self.pal_dur = self.rng.range(3.0, 12.0);
             } else {
-                let dur = self.rng.range(4.0, 25.0);
+                let dur = self.rng.range(6.0, 25.0);
                 self.blend_palette_to_new(t, dur);
             }
         }
@@ -413,7 +416,8 @@ impl Director {
         let ts = t as f32;
         let surge =
             1.0 + 0.85 * (0.11 * ts + self.surge_phase[0]).sin() + 0.45 * (0.047 * ts + self.surge_phase[1]).sin();
-        self.offset = (self.offset + (self.cycle * surge * self.cycle_mult * dt) as f64).rem_euclid(1.0);
+        let pace = (self.cycle * surge).clamp(-MAX_CYCLE, MAX_CYCLE);
+        self.offset = (self.offset + (pace * self.cycle_mult * dt) as f64).rem_euclid(1.0);
 
         let move_dt = dt * self.motion_mult;
         let shown = if self.show_objects { self.objects.len() } else { 0 };
