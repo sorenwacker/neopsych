@@ -643,7 +643,11 @@ impl Director {
         self.field_start = t;
         self.field_dur = r.range(2.0, 5.0);
         self.field_active = true;
-        self.next_field = t + (self.transition_seconds * r.range(0.67, 1.33)) as f64;
+        // Very uneven gaps, from under half to about two and a half times
+        // transition_seconds, spread evenly on a log scale so short and long
+        // waits are both common and there is no steady beat.
+        let spread = r.range(0.4f32.ln(), 2.5f32.ln()).exp();
+        self.next_field = t + (self.transition_seconds * spread) as f64;
     }
 
     /// Small surprises within a preset: reverse the cycling, change its pace,
