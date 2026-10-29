@@ -22,7 +22,7 @@ const GONE: f32 = 100.0;
 const EVENT_EVERY: (f32, f32) = (4.0, 12.0);
 /// Fastest colour cycling, in palette turns per second, before the speed
 /// hotkeys scale it: surges and presets never go past this.
-const MAX_CYCLE: f32 = 0.35;
+const MAX_CYCLE: f32 = 0.6;
 /// The symmetries a preset can get, with how often (out of 40) it gets each.
 /// The M hotkey steps through them in this order.
 const SYMMETRIES: [(Symmetry, u32); 9] = [
@@ -384,11 +384,11 @@ impl Director {
         // then stays a while first, so the changes have no steady rhythm.
         if t >= self.pal_start + self.pal_dur as f64 {
             self.pal_from = self.pal_to;
-            if self.rng.chance(0.35) {
+            if self.rng.chance(0.25) {
                 self.pal_start = t;
                 self.pal_dur = self.rng.range(3.0, 12.0);
             } else {
-                let dur = self.rng.range(6.0, 25.0);
+                let dur = self.rng.range(5.0, 20.0);
                 self.blend_palette_to_new(t, dur);
             }
         }
