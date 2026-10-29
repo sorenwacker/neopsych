@@ -104,7 +104,7 @@ The settings file is `%APPDATA%\neopsych\neopsych.ini`; start neopsych with
 | `preset` | 0 | 0 = all presets in random order; 1–120 = stay on one |
 | `image_folder` | *(empty)* | folder of pictures; empty = your Pictures folder |
 | `image_subfolders` | false | also use pictures in its subfolders (**S**) |
-| `image_chance` | 0.9 | chance a new background is a picture; 0 = never |
+| `image_chance` | 0.4 | chance a new background is a picture; 0 = never |
 | `pictures` | true | pictures on (**P**) |
 | `objects` | true | moving shapes on (**O**) |
 | `hold_background` | false | keep the background (**L**) |

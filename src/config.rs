@@ -52,7 +52,7 @@ impl Default for Config {
             preset: 0,
             image_folder: None,
             image_subfolders: false,
-            image_chance: 0.9,
+            image_chance: 0.4,
             pictures: true,
             objects: true,
             hold_background: false,
@@ -99,7 +99,7 @@ image_folder =
 image_subfolders = false
 
 # chance (0 to 1) that a new background is a picture; 0 turns pictures off
-image_chance = 0.9
+image_chance = 0.4
 
 # false = patterns only for now (the P hotkey switches this)
 pictures = true
