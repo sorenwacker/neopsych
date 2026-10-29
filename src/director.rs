@@ -29,9 +29,8 @@ const SURGE: (f32, f32) = (0.5, 1.5);
 const SURGE_HOLD: (f32, f32) = (6.0, 20.0);
 const SURGE_GLIDE: (f32, f32) = (1.5, 4.0);
 
-/// One step of the colour cycling's speed: gliding from rom to 	o,
-/// then holding until 
-ext.
+/// One step of the colour cycling's speed: gliding from `from` to `to`,
+/// then holding until `next`.
 struct Surge {
     from: f32,
     to: f32,
@@ -46,6 +45,7 @@ impl Surge {
         self.from + (self.to - self.from) * ease(k)
     }
 }
+
 /// The symmetries a preset can get, with how often (out of 40) it gets each.
 /// The M hotkey steps through them in this order.
 const SYMMETRIES: [(Symmetry, u32); 9] = [
