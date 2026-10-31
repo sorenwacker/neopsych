@@ -153,10 +153,11 @@ float rotation(float t) {
 }
 
 // Counts palettes: one per `period` seconds on average, but drifting
-// between quicker and slower changes. Always increasing, since the wobble's
-// slope (0.35 * 0.13 + 0.2 * 0.071) stays below 1 / 12.
+// between quicker and slower changes. The wobble's slope
+// (0.2 * 0.13 + 0.1 * 0.071) stays within 0.4 / 12, so at the default
+// period a palette takes 9 to 20 s, never long enough to look stuck.
 float palette_clock(float t) {
-    return t / period + (12.0 / period) * (0.35 * sin(0.13 * t) + 0.2 * sin(0.071 * t + 2.0));
+    return t / period + (12.0 / period) * (0.2 * sin(0.13 * t) + 0.1 * sin(0.071 * t + 2.0));
 }
 
 vec4 hook() {
