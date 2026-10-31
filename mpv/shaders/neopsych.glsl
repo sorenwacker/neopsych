@@ -145,11 +145,11 @@ float luma(vec3 c) {
 
 // How far the palette has turned, in cycles. It turns at `speed` on average,
 // but a mix of two slow waves at unrelated frequencies makes it speed up to
-// about three times that, slow down, sometimes stop or turn back, and never
+// 1.8 times that and slow down to 0.2 times, never stopping, and never
 // repeat exactly, like neopsych's changes of pace. This is the integral of
-// 2 speed (0.5 + 0.7 sin(0.11 t) + 0.4 sin(0.047 t + 1.3)).
+// speed (1 + 0.5 sin(0.11 t) + 0.3 sin(0.047 t + 1.3)).
 float rotation(float t) {
-    return 2.0 * speed * (0.5 * t - 0.7 / 0.11 * cos(0.11 * t) - 0.4 / 0.047 * cos(0.047 * t + 1.3));
+    return speed * (t - 0.5 / 0.11 * cos(0.11 * t) - 0.3 / 0.047 * cos(0.047 * t + 1.3));
 }
 
 // Counts palettes: one per `period` seconds on average, but drifting
