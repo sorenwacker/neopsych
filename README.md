@@ -135,11 +135,15 @@ The `mpv` folder brings the same colour cycling to videos played in
 | **k** | kaleidoscope on / off; fills the screen even for square videos |
 | **Shift+K** | kaleidoscope wedges: steps through 2, 4, 6, 3 |
 | **b** | motion blur on / off |
+| **n** | random mode on / off: every 10 to 40 s jump to a random other video in the same folder, somewhere in its middle |
+| **Shift+N** | jump to a random other video now |
 | **↑ / ↓** | playback faster / slower; below normal speed frames blend smoothly |
 | **Shift+↑ / ↓** | jump a minute forward / back |
 
 Each key shows what it switched to. All other keys are mpv's usual ones
 (Space pause, Enter next file, ← → seek, f fullscreen, q quit).
+Mute and volume, the effects and their settings are kept as you last left
+them (in `%APPDATA%\mpv\effects.txt` and `volume.txt`).
 
 ## Building
 
