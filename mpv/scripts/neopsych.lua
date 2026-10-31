@@ -21,11 +21,6 @@ local function shader_on(path)
     return false
 end
 
-local function toggle_shader(name, label)
-    mp.commandv("change-list", "glsl-shaders", "toggle", SHADERS[name])
-    mp.osd_message(label .. ": " .. onoff(shader_on(SHADERS[name])))
-end
-
 local function blur_on()
     for _, f in ipairs(mp.get_property_native("vf", {})) do
         if f.label == "blur" then
@@ -37,18 +32,42 @@ end
 
 -- Each setting steps through its values, starting from the shader's default.
 local steps = {
-    speed = { label = "Colour speed", values = { 0.12, 0.4, 1.0, 0.04 } },
-    amount = { label = "Effect strength", values = { 1, 0.5, 0.25 } },
-    sectors = { label = "Kaleidoscope wedges", values = { 3, 2, 4, 6 } },
+    speed = { label = "Colour speed", values = { 0.12, 0.4, 1.0, 0.04 }, i = 1 },
+    amount = { label = "Effect strength", values = { 1, 0.5, 0.25 }, i = 1 },
+    sectors = { label = "Kaleidoscope wedges", values = { 3, 2, 4, 6 }, i = 1 },
 }
 
+-- Everything the keys switch is kept in effects.txt next to this folder, so
+-- mpv starts the way it was last left.
+local STATE_FILE = mp.command_native({ "expand-path", "~~/effects.txt" })
+
+local function save_state()
+    local f = io.open(STATE_FILE, "w")
+    if not f then
+        return
+    end
+    f:write("colour=", onoff(shader_on(SHADERS.colour)), "\n")
+    f:write("kaleido=", onoff(shader_on(SHADERS.kaleido)), "\n")
+    f:write("blur=", onoff(blur_on()), "\n")
+    for key, s in pairs(steps) do
+        f:write(key, "=", s.i, "\n")
+    end
+    f:close()
+end
+
+local function toggle_shader(name, label)
+    mp.commandv("change-list", "glsl-shaders", "toggle", SHADERS[name])
+    mp.osd_message(label .. ": " .. onoff(shader_on(SHADERS[name])))
+    save_state()
+end
+
 for key, s in pairs(steps) do
-    local i = 1
     mp.add_key_binding(nil, key, function()
-        i = i % #s.values + 1
-        local v = s.values[i]
+        s.i = s.i % #s.values + 1
+        local v = s.values[s.i]
         mp.commandv("change-list", "glsl-shader-opts", "append", key .. "=" .. v)
         mp.osd_message(s.label .. ": " .. v)
+        save_state()
     end)
 end
 
@@ -92,6 +111,15 @@ local function update_rate()
     mp.commandv("change-list", "glsl-shader-opts", "append", string.format("offset=%.4f", offset))
 end
 
+-- mpv restarts its frame counter for every new file (not on seeks), so the
+-- time counted so far moves into the offset and the effects carry on.
+mp.register_event("file-loaded", function()
+    count_frames()
+    offset = offset + frames / rate
+    frames = 0
+    mp.commandv("change-list", "glsl-shader-opts", "append", string.format("offset=%.4f", offset))
+end)
+
 -- Nothing is drawn while paused, so those seconds don't count.
 mp.observe_property("pause", "bool", function(_, p)
     count_frames()
@@ -130,4 +158,35 @@ mp.register_event("file-loaded", fit_kaleido)
 mp.add_key_binding(nil, "blur", function()
     mp.commandv("vf", "toggle", BLUR)
     mp.osd_message("Motion blur: " .. onoff(blur_on()))
+    save_state()
 end)
+
+-- Start the way it was last left (see save_state).
+local f = io.open(STATE_FILE, "r")
+if f then
+    local saved = {}
+    for line in f:lines() do
+        local k, v = line:match("^(%w+)=(%w+)$")
+        if k then
+            saved[k] = v
+        end
+    end
+    f:close()
+    -- Colour before kaleidoscope, the order the keys usually give.
+    for _, name in ipairs({ "colour", "kaleido" }) do
+        local path = SHADERS[name]
+        if (saved[name] == "on") ~= shader_on(path) then
+            mp.commandv("change-list", "glsl-shaders", "toggle", path)
+        end
+    end
+    if (saved.blur == "on") ~= blur_on() then
+        mp.commandv("vf", "toggle", BLUR)
+    end
+    for key, s in pairs(steps) do
+        local i = tonumber(saved[key])
+        if i and s.values[i] then
+            s.i = i
+            mp.commandv("change-list", "glsl-shader-opts", "append", key .. "=" .. s.values[i])
+        end
+    end
+end
