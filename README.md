@@ -7,7 +7,7 @@ palette; the palette rotates and morphs, shapes paint their trails into the
 picture, and backgrounds (patterns or your own pictures) fade in now and then.
 There are 120 presets: 24 families in 5 variations each.
 
-![neopsych playing preset 087, Pulse Hearts II](assets/screenshot.jpg)
+![neopsych playing preset 005, Ring Dance V](assets/screenshot.jpg)
 
 ## Running it
 
